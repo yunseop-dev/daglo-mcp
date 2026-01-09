@@ -186,10 +186,32 @@ class DagloMcpServer {
       },
       async (args) => {
         const params = new URLSearchParams();
-        if (args.fileMetaId) params.append("fileMetaId", args.fileMetaId);
+        if (args.includeContent !== false) params.append("includeContent", "true");
+        if (args.includeSummary !== false) params.append("includeSummary", "true");
+        if (args.includeKeywords !== false) params.append("includeKeywords", "true");
+        if (args.includeAiSummary !== false) params.append("includeAiSummary", "true");
+        if (args.includeSegments !== false) params.append("includeSegments", "true");
 
+        // Try file-meta API first (for script content)
+        if (args.fileMetaId) {
+          const scriptResponse = await fetch(
+            `${DAGLO_API_BASE}/file-meta/${args.fileMetaId}/script?${params.toString()}`,
+            this.getAuthHeaders()
+          );
+
+          if (scriptResponse.ok) {
+            const scriptData = await scriptResponse.json();
+            return {
+              content: [
+                { type: "text", text: JSON.stringify(scriptData, null, 2) },
+              ],
+            };
+          }
+        }
+
+        // Fall back to boards API
         const response = await fetch(
-          `${DAGLO_API_BASE}/v2/boards/${args.boardId}?${params.toString()}`,
+          `${DAGLO_API_BASE}/boards/${args.boardId}`,
           this.getAuthHeaders()
         );
 
