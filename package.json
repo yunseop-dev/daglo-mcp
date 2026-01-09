@@ -22,6 +22,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "pino": "^10.1.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {

@@ -109,6 +109,55 @@ The server interacts with the following Daglo API endpoints:
 
 ## Development
 
+### Logging
+
+The server uses Pino for structured logging. Log levels can be controlled via environment variables.
+
+**Environment Variables:**
+- `LOG_LEVEL`: Set logging level (`debug`, `info`, `warn`, `error`, `fatal`)
+- `NODE_ENV`: Set to `production` for production logging (info level), `development` for detailed logging (debug level)
+
+**Examples:**
+
+```bash
+# Debug logging (default in development)
+LOG_LEVEL=debug npm start
+
+# Info logging (default in production)
+LOG_LEVEL=info npm start
+
+# Production mode
+NODE_ENV=production npm start
+
+# Combined
+NODE_ENV=production LOG_LEVEL=warn npm start
+```
+
+**Login Debugging:**
+
+When login fails, the server logs detailed information:
+
+- Login attempt with unique ID
+- Request URL and payload
+- HTTP response status and headers
+- Response body for debugging
+- Token extraction process
+- Success or failure with specific error details
+
+**Log Example:**
+```json
+{
+  "level": "error",
+  "time": "2026-01-09T06:50:00.000Z",
+  "msg": "Login request failed",
+  "loginId": "abc123",
+  "status": 401,
+  "statusText": "Unauthorized",
+  "responseBody": "{...}",
+  "responseHeaders": [["content-type", "application/json"]]
+}
+```
+
 ### TypeScript
 
 ```bash
