@@ -57,6 +57,7 @@ Retrieve all boards from Daglo with optional filters.
 **Parameters:**
 - `page` (number, optional): Page number (default: 1)
 - `limit` (number, optional): Number of boards per page
+- `sort` (string, optional): Sort expression (default: createTime.desc, examples: createTime.desc, name.asc, name.desc)
 - `status` (string, optional): Filter by board status (COMPLETE, PROCESSING, FAILED)
 - `isStarred` (boolean, optional): Filter by starred boards
 - `checkedFilter` (string, optional): Filter by incomplete recordings or PDFs (incompleteRecording, isPdf)

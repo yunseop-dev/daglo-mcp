@@ -274,6 +274,12 @@ class DagloMcpServer {
         inputSchema: {
           page: z.number().optional().describe("Page number (default: 1)"),
           limit: z.number().optional().describe("Number of boards per page"),
+          sort: z
+            .string()
+            .optional()
+            .describe(
+              "Sort expression (default: createTime.desc, examples: createTime.desc, name.asc, name.desc)"
+            ),
           status: z
             .enum(["COMPLETE", "PROCESSING", "FAILED"])
             .optional()
@@ -293,6 +299,7 @@ class DagloMcpServer {
         const params = new URLSearchParams();
         if (args.page) params.append("page", args.page.toString());
         if (args.limit) params.append("limit", args.limit.toString());
+        params.append("sort", args.sort ?? "createTime.desc");
         if (args.status) params.append("filter.status", args.status);
         if (args.isStarred) params.append("isStarred", "true");
         if (args.checkedFilter)
