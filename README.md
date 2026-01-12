@@ -84,6 +84,56 @@ Retrieve detailed information including content, summary, keywords, AI summary, 
 }
 ```
 
+#### `get-latest-board-content`
+Retrieve the content of the most recently created board. Optionally decodes zlib+base64 content.
+
+**Parameters:**
+- `limit` (number, optional): Number of boards to inspect (default: 50)
+- `decodeContent` (boolean, optional): Decode zlib+base64 content (default: true)
+
+**Example:**
+```json
+{
+  "limit": 20,
+  "decodeContent": true
+}
+```
+
+#### `export-board-content`
+Export board content as punctuation-split JSON or plain text.
+
+**Parameters:**
+- `format` (string, required): Output format (punctuation-json or text)
+- `outputPath` (string, optional): Output file path
+- `boardId` (string, optional): Board ID to export (default: latest board)
+- `fileMetaId` (string, optional): File metadata ID (optional)
+- `limit` (number, optional): Number of boards to inspect (default: 50)
+
+**Example (punctuation-json):**
+```json
+{
+  "format": "punctuation-json",
+  "outputPath": "/tmp/latest-board-segments.json"
+}
+```
+
+**Example (text):**
+```json
+{
+  "format": "text",
+  "outputPath": "/tmp/latest-board-content.txt"
+}
+```
+
+**Example (specific board):**
+```json
+{
+  "format": "text",
+  "boardId": "abc123",
+  "outputPath": "/tmp/board-abc123.txt"
+}
+```
+
 #### `get-folders`
 Retrieve all folders from Daglo.
 
