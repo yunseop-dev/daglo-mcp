@@ -9,9 +9,13 @@ MCP (Model Context Protocol) server for Daglo AI platform - speech-to-text trans
 - **Folder Organization**: Access folder structure
 - **Quota Tracking**: Check usage limits and quotas
 - **Plan Management**: View available subscription plans
-- **Bookmarks**: Create and retrieve bookmarks for specific timestamps in boards
-- **Notifications**: Get and manage user notifications
-- **User Dictionary**: Manage custom dictionary for specialized terminology
+- **Bookmarks** (Phase 1): Create and retrieve bookmarks for specific timestamps in boards
+- **Notifications** (Phase 1): Get and manage user notifications
+- **User Dictionary** (Phase 1): Manage custom dictionary for specialized terminology
+- **User Profile & Settings** (Phase 2): View and update user profile, email, and preferences
+- **Notification Options** (Phase 2): Manage notification delivery channels and categories
+- **Summary Language Settings** (Phase 2): Configure transcription and summary language preferences
+- **Board Sharing** (Phase 2): Create shareable links and view shared board information
 
 ## Installation
 
@@ -352,6 +356,159 @@ Delete a word from the user's custom dictionary.
 }
 ```
 
+#### `get-user-profile` (NEW - PHASE 2)
+Retrieve the current user's profile information.
+
+**Parameters:** None
+
+**Example:**
+```json
+{}
+```
+
+**Response includes:**
+- User ID, name, email
+- Account status and settings
+- Linked social providers
+- Subscription plan
+- Profile background color
+
+#### `update-user-profile` (NEW - PHASE 2)
+Update the current user's profile information.
+
+**Parameters:**
+- `name` (string, optional): User's full name
+- `marketingAgreement` (boolean, optional): Marketing consent
+- `dataAgreement` (boolean, optional): Data usage consent
+- `profileBackground` (enum, optional): Profile color theme (SECONDARY_ROSE, WARNING, SUCCESS, PRIMARY, SECONDARY_VIOLET)
+
+**Example:**
+```json
+{
+  "name": "John Doe",
+  "marketingAgreement": true,
+  "profileBackground": "PRIMARY"
+}
+```
+
+#### `get-user-email` (NEW - PHASE 2)
+Retrieve the current user's email address.
+
+**Parameters:** None
+
+**Example:**
+```json
+{}
+```
+
+#### `get-notification-options` (NEW - PHASE 2)
+Retrieve the user's notification preferences.
+
+**Parameters:** None
+
+**Response includes:**
+- Notification delivery methods (EMAIL, MOBILE)
+- Categories (MARKETING, TRANSCRIPT, LONG_SUMMARY)
+- Enabled/disabled status for each
+
+**Example:**
+```json
+{}
+```
+
+#### `update-notification-option` (NEW - PHASE 2)
+Update a specific notification preference.
+
+**Parameters:**
+- `type` (enum, required): EMAIL or MOBILE
+- `category` (enum, required): MARKETING, TRANSCRIPT, or LONG_SUMMARY
+- `value` (boolean, required): Enable or disable
+
+**Example:**
+```json
+{
+  "type": "EMAIL",
+  "category": "TRANSCRIPT",
+  "value": true
+}
+```
+
+#### `get-summary-language` (NEW - PHASE 2)
+Retrieve the user's summary language preferences.
+
+**Parameters:**
+- `transcriptionLanguage` (enum, optional): ko-KR or en-US
+
+**Example:**
+```json
+{
+  "transcriptionLanguage": "en-US"
+}
+```
+
+#### `update-summary-language` (NEW - PHASE 2)
+Update the user's summary language preferences.
+
+**Parameters:**
+- `transcriptionLanguage` (enum, required): ko-KR or en-US
+- `summaryLanguage` (enum, required): ko-KR or en-US
+
+**Example:**
+```json
+{
+  "transcriptionLanguage": "en-US",
+  "summaryLanguage": "ko-KR"
+}
+```
+
+#### `create-share-link` (NEW - PHASE 2)
+Create or update a shareable link for a board.
+
+**Parameters:**
+- `boardId` (string, required): The board ID to share
+- `isShared` (boolean, optional): Enable sharing (true) or disable (false) - defaults to true
+- `expiredAt` (string, optional): Share expiration date (ISO string)
+- `permission` (number, optional): Permission level (default: 1)
+- `isBookmarkSharable` (boolean, optional): Allow sharing of bookmarks (default: false)
+
+**Example:**
+```json
+{
+  "boardId": "V3K8cTczuRrvLl2v",
+  "isShared": true,
+  "isBookmarkSharable": true
+}
+```
+
+**To revoke sharing:**
+```json
+{
+  "boardId": "V3K8cTczuRrvLl2v",
+  "isShared": false
+}
+```
+
+#### `get-shared-board-info` (NEW - PHASE 2)
+Retrieve information about a shared board (public access, no authentication required).
+
+**Parameters:**
+- `shareId` (string, required): The share ID from the share URL
+- `includeDetails` (boolean, optional): Include full board details
+
+**Example:**
+```json
+{
+  "shareId": "share-abc123",
+  "includeDetails": true
+}
+```
+
+**Response includes:**
+- Board name and metadata
+- Share URL and permissions
+- Bookmarks (if shareable)
+- Board content and segments
+
 ## Test Coverage
 
 The project includes comprehensive tests for all MCP tools:
@@ -361,9 +518,13 @@ The project includes comprehensive tests for all MCP tools:
 - **Folder Tests**: Folder listing with and without root
 - **Quota Tests**: Usage quota retrieval
 - **Plan Tests**: Subscription plan information
-- **Bookmark Tests**: Bookmark retrieval and creation
-- **Notification Tests**: Notification retrieval and status management
-- **Dictionary Tests**: Dictionary word retrieval, addition, and deletion
+- **Bookmark Tests** (Phase 1): Bookmark retrieval and creation
+- **Notification Tests** (Phase 1): Notification retrieval and status management
+- **Dictionary Tests** (Phase 1): Dictionary word retrieval, addition, and deletion
+- **User Profile Tests** (Phase 2): Get and update user profile information
+- **Notification Options Tests** (Phase 2): Get and update notification preferences
+- **Summary Language Tests** (Phase 2): Get and update summary language settings
+- **Board Sharing Tests** (Phase 2): Create share links and retrieve shared board info
 - **URL Construction**: URL building and parameter handling
 - **Type Validation**: Board status and type validation
 - **Error Handling**: Various HTTP error scenarios

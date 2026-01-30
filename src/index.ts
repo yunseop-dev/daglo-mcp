@@ -1603,6 +1603,468 @@ class DagloMcpServer {
         }
       }
     );
+
+    // USER SETTINGS & PROFILE TOOLS
+
+    this.server.registerTool(
+      "get-user-profile",
+      {
+        title: "Get User Profile",
+        description: "Retrieve the current user's profile information",
+        inputSchema: {},
+      },
+      async () => {
+        try {
+          const response = await fetch(`${DAGLO_API_BASE}/user`, this.getAuthHeaders());
+
+          if (!response.ok) {
+            throw new Error(`Failed to fetch user profile: ${response.statusText}`);
+          }
+
+          const profile = (await response.json()) as Record<string, unknown>;
+          
+          logger.debug({ userId: profile.id }, "User profile retrieved");
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(profile, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ error }, "Get user profile failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "update-user-profile",
+      {
+        title: "Update User Profile",
+        description: "Update the current user's profile information",
+        inputSchema: {
+          name: z.string().optional().describe("User's full name"),
+          marketingAgreement: z
+            .boolean()
+            .optional()
+            .describe("Marketing consent"),
+          dataAgreement: z
+            .boolean()
+            .optional()
+            .describe("Data usage consent"),
+          profileBackground: z
+            .enum(["SECONDARY_ROSE", "WARNING", "SUCCESS", "PRIMARY", "SECONDARY_VIOLET"])
+            .optional()
+            .describe("Profile background color theme"),
+        },
+      },
+      async (args) => {
+        const requestBody: Record<string, unknown> = {};
+        if (args.name) requestBody.name = args.name;
+        if (args.marketingAgreement !== undefined) requestBody.marketingAgreement = args.marketingAgreement;
+        if (args.dataAgreement !== undefined) requestBody.dataAgreement = args.dataAgreement;
+        if (args.profileBackground) requestBody.profileBackground = args.profileBackground;
+
+        try {
+          const response = await fetch(`${DAGLO_API_BASE}/user`, {
+            method: "PATCH",
+            ...this.getAuthHeaders(),
+            body: JSON.stringify(requestBody),
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to update user profile: ${response.statusText}`
+            );
+          }
+
+          const updated = (await response.json()) as Record<string, unknown>;
+
+          logger.debug({ userId: updated.id }, "User profile updated");
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(updated, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ error }, "Update user profile failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "get-user-email",
+      {
+        title: "Get User Email",
+        description: "Retrieve the current user's email address",
+        inputSchema: {},
+      },
+      async () => {
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/user/email`,
+            this.getAuthHeaders()
+          );
+
+          if (!response.ok) {
+            throw new Error(`Failed to fetch user email: ${response.statusText}`);
+          }
+
+          const data = (await response.json()) as { email?: string };
+
+          logger.debug("User email retrieved");
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(data, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ error }, "Get user email failed");
+          throw error;
+        }
+      }
+    );
+
+    // NOTIFICATION SETTINGS TOOLS
+
+    this.server.registerTool(
+      "get-notification-options",
+      {
+        title: "Get Notification Options",
+        description: "Retrieve the user's notification preferences",
+        inputSchema: {},
+      },
+      async () => {
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/user-option/notification`,
+            this.getAuthHeaders()
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch notification options: ${response.statusText}`
+            );
+          }
+
+          const options = (await response.json()) as Array<Record<string, unknown>>;
+
+          logger.debug({ count: options.length }, "Notification options retrieved");
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(options, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ error }, "Get notification options failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "update-notification-option",
+      {
+        title: "Update Notification Option",
+        description: "Update a specific notification preference",
+        inputSchema: {
+          type: z
+            .enum(["EMAIL", "MOBILE"])
+            .describe("Notification delivery method"),
+          category: z
+            .enum(["MARKETING", "TRANSCRIPT", "LONG_SUMMARY"])
+            .describe("Notification category"),
+          value: z.boolean().describe("Enable or disable this notification"),
+        },
+      },
+      async (args) => {
+        const requestBody = {
+          type: args.type,
+          category: args.category,
+          value: args.value,
+        };
+
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/v2/user-option/notification`,
+            {
+              method: "PATCH",
+              ...this.getAuthHeaders(),
+              body: JSON.stringify(requestBody),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to update notification option: ${response.statusText}`
+            );
+          }
+
+          const updated = (await response.json()) as Record<string, unknown>;
+
+          logger.debug(
+            { type: args.type, category: args.category },
+            "Notification option updated"
+          );
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(updated, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ error }, "Update notification option failed");
+          throw error;
+        }
+      }
+    );
+
+    // SUMMARY LANGUAGE TOOLS
+
+    this.server.registerTool(
+      "get-summary-language",
+      {
+        title: "Get Summary Language Settings",
+        description: "Retrieve the user's summary language preferences",
+        inputSchema: {
+          transcriptionLanguage: z
+            .enum(["ko-KR", "en-US"])
+            .optional()
+            .describe("Transcription language"),
+        },
+      },
+      async (args) => {
+        const params = new URLSearchParams();
+        if (args.transcriptionLanguage) {
+          params.append("transcriptionLanguage", args.transcriptionLanguage);
+        }
+
+        try {
+          const url = `${DAGLO_API_BASE}/user-option/summary/language${params.toString() ? "?" + params.toString() : ""}`;
+          const response = await fetch(url, this.getAuthHeaders());
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch summary language: ${response.statusText}`
+            );
+          }
+
+          const settings = (await response.json()) as Record<string, unknown>;
+
+          logger.debug("Summary language settings retrieved");
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(settings, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ error }, "Get summary language failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "update-summary-language",
+      {
+        title: "Update Summary Language Settings",
+        description: "Update the user's summary language preferences",
+        inputSchema: {
+          transcriptionLanguage: z
+            .enum(["ko-KR", "en-US"])
+            .describe("Transcription language"),
+          summaryLanguage: z
+            .enum(["ko-KR", "en-US"])
+            .describe("Summary language"),
+        },
+      },
+      async (args) => {
+        const requestBody = {
+          transcriptionLanguage: args.transcriptionLanguage,
+          summaryLanguage: args.summaryLanguage,
+        };
+
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/user-option/summary/language`,
+            {
+              method: "PATCH",
+              ...this.getAuthHeaders(),
+              body: JSON.stringify(requestBody),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to update summary language: ${response.statusText}`
+            );
+          }
+
+          const updated = (await response.json()) as Record<string, unknown>;
+
+          logger.debug("Summary language settings updated");
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(updated, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ error }, "Update summary language failed");
+          throw error;
+        }
+      }
+    );
+
+    // BOARD SHARING TOOLS
+
+    this.server.registerTool(
+      "create-share-link",
+      {
+        title: "Create/Update Board Share Link",
+        description:
+          "Create or update a shareable link for a board. Set isShared to false to revoke sharing.",
+        inputSchema: {
+          boardId: z.string().describe("The board ID to share"),
+          isShared: z
+            .boolean()
+            .optional()
+            .describe("Enable sharing (true) or disable (false) - defaults to true"),
+          expiredAt: z
+            .string()
+            .optional()
+            .describe("Share expiration date (ISO string)"),
+          permission: z
+            .number()
+            .optional()
+            .describe("Permission level (default: 1)"),
+          isBookmarkSharable: z
+            .boolean()
+            .optional()
+            .describe("Allow sharing of bookmarks (default: false)"),
+        },
+      },
+      async (args) => {
+        const requestBody: Record<string, unknown> = {
+          boardId: args.boardId,
+        };
+
+        if (args.isShared !== undefined) requestBody.isShared = args.isShared;
+        if (args.expiredAt) requestBody.expiredAt = args.expiredAt;
+        if (args.permission !== undefined) requestBody.permission = args.permission;
+        if (args.isBookmarkSharable !== undefined)
+          requestBody.isBookmarkSharable = args.isBookmarkSharable;
+
+        try {
+          const response = await fetch(`${DAGLO_API_BASE}/boards/share`, {
+            method: "POST",
+            ...this.getAuthHeaders(),
+            body: JSON.stringify(requestBody),
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to create share link: ${response.statusText}`
+            );
+          }
+
+          const shareData = (await response.json()) as Record<string, unknown>;
+
+          logger.debug({ boardId: args.boardId }, "Share link created/updated");
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(shareData, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ boardId: args.boardId, error }, "Create share link failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "get-shared-board-info",
+      {
+        title: "Get Shared Board Information",
+        description:
+          "Retrieve information about a shared board (public access, no authentication required)",
+        inputSchema: {
+          shareId: z.string().describe("The share ID from the share URL"),
+          includeDetails: z
+            .boolean()
+            .optional()
+            .describe("Include full board details"),
+        },
+      },
+      async (args) => {
+        const params = new URLSearchParams();
+        if (args.includeDetails) {
+          params.append("includeDetails", "true");
+        }
+
+        try {
+          const url = `${DAGLO_API_BASE}/shared-board/${args.shareId}${params.toString() ? "?" + params.toString() : ""}`;
+          const response = await fetch(url, {
+            headers: {
+              "daglo-platform": "web",
+            },
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch shared board info: ${response.statusText}`
+            );
+          }
+
+          const boardInfo = (await response.json()) as Record<string, unknown>;
+
+          logger.debug({ shareId: args.shareId }, "Shared board info retrieved");
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(boardInfo, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ shareId: args.shareId, error }, "Get shared board info failed");
+          throw error;
+        }
+      }
+    );
   }
 
   private getAuthHeaders(
