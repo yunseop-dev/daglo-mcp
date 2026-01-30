@@ -10,7 +10,10 @@
     "dev": "tsc && node dist/index.js",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "test:coverage": "vitest --coverage",
+    "test:all-tools": "node scripts/test-all-tools.js",
+    "test:debug": "node scripts/debug-script.js",
+    "test:board-detail": "node scripts/test-board-detail.js"
   },
   "keywords": [
     "mcp",
