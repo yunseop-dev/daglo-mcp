@@ -94,3 +94,26 @@ export interface DagloLoginResponse {
   refreshToken?: string;
   expiresAt?: string;
 }
+
+// Bookmarks
+export interface DagloBookmark {
+  id: string;
+  boardId: string;
+  title: string;
+  description?: string;
+  timestamp?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// User Dictionary
+export interface DagloUserDictionary {
+  id: string;
+  word: string;
+  pronunciation?: string;
+  definition?: string;
+  category?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+

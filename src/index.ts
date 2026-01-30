@@ -1228,6 +1228,381 @@ class DagloMcpServer {
         }
       }
     );
+
+    // Register Bookmarks tools
+    this.server.registerTool(
+      "get-bookmarks",
+      {
+        title: "Get Bookmarks",
+        description:
+          "Retrieve all bookmarks from a specific board with optional pagination",
+        inputSchema: {
+          boardId: z
+            .string()
+            .min(1)
+            .describe("Board ID to fetch bookmarks for"),
+          page: z
+            .number()
+            .optional()
+            .describe("Page number (default: 1)"),
+          limit: z
+            .number()
+            .optional()
+            .describe("Number of bookmarks per page (default: 50)"),
+        },
+      },
+      async (args) => {
+        const { boardId, page = 1, limit = 50 } = args as {
+          boardId: string;
+          page?: number;
+          limit?: number;
+        };
+
+        try {
+          const params = new URLSearchParams();
+          params.set("page", String(page));
+          params.set("limit", String(limit));
+
+          const response = await fetch(
+            `${DAGLO_API_BASE}/v2/boards/${boardId}/bookmarks?${params.toString()}`,
+            this.getAuthHeaders()
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch bookmarks: ${response.statusText}`
+            );
+          }
+
+          const data = (await response.json()) as unknown;
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ boardId, error }, "Get bookmarks failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "create-bookmark",
+      {
+        title: "Create Bookmark",
+        description: "Create a new bookmark in a board at a specific timestamp",
+        inputSchema: {
+          boardId: z
+            .string()
+            .min(1)
+            .describe("Board ID to create bookmark in"),
+          title: z.string().min(1).describe("Bookmark title"),
+          timestamp: z
+            .number()
+            .optional()
+            .describe("Timestamp in seconds"),
+          description: z
+            .string()
+            .optional()
+            .describe("Bookmark description"),
+        },
+      },
+      async (args) => {
+        const { boardId, title, timestamp, description } = args as {
+          boardId: string;
+          title: string;
+          timestamp?: number;
+          description?: string;
+        };
+
+        try {
+          const payload = { title, timestamp, description };
+
+          const response = await fetch(
+            `${DAGLO_API_BASE}/v2/boards/${boardId}/bookmarks`,
+            {
+              method: "POST",
+              ...this.getAuthHeaders(),
+              body: JSON.stringify(payload),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to create bookmark: ${response.statusText}`
+            );
+          }
+
+          const data = (await response.json()) as unknown;
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ boardId, title, error }, "Create bookmark failed");
+          throw error;
+        }
+      }
+    );
+
+    // Register Notifications tools
+    this.server.registerTool(
+      "get-notifications",
+      {
+        title: "Get Notifications",
+        description:
+          "Retrieve user notifications with optional filtering by read status",
+        inputSchema: {
+          isRead: z
+            .boolean()
+            .optional()
+            .describe("Filter by read status (true/false)"),
+          page: z
+            .number()
+            .optional()
+            .describe("Page number (default: 1)"),
+          limit: z
+            .number()
+            .optional()
+            .describe("Number of notifications per page (default: 20)"),
+        },
+      },
+      async (args) => {
+        const { isRead, page = 1, limit = 20 } = args as {
+          isRead?: boolean;
+          page?: number;
+          limit?: number;
+        };
+
+        try {
+          const params = new URLSearchParams();
+          params.set("page", String(page));
+          params.set("limit", String(limit));
+          if (isRead !== undefined) {
+            params.set("isRead", String(isRead));
+          }
+
+          const response = await fetch(
+            `${DAGLO_API_BASE}/notifications?${params.toString()}`,
+            this.getAuthHeaders()
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch notifications: ${response.statusText}`
+            );
+          }
+
+          const data = (await response.json()) as unknown;
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ error }, "Get notifications failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "mark-notification-read",
+      {
+        title: "Mark Notification Read",
+        description: "Mark a notification as read",
+        inputSchema: {
+          notificationId: z
+            .string()
+            .min(1)
+            .describe("Notification ID to mark as read"),
+        },
+      },
+      async (args) => {
+        const { notificationId } = args as { notificationId: string };
+
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/notifications/${notificationId}/read`,
+            {
+              method: "PUT",
+              ...this.getAuthHeaders(),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to mark notification as read: ${response.statusText}`
+            );
+          }
+
+          const data = (await response.json()) as unknown;
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error(
+            { notificationId, error },
+            "Mark notification read failed"
+          );
+          throw error;
+        }
+      }
+    );
+
+    // Register User Dictionary tools
+    this.server.registerTool(
+      "get-user-dictionary",
+      {
+        title: "Get User Dictionary",
+        description: "Retrieve user's custom dictionary with optional filtering",
+        inputSchema: {
+          category: z
+            .string()
+            .optional()
+            .describe("Filter by category"),
+          page: z
+            .number()
+            .optional()
+            .describe("Page number (default: 1)"),
+          limit: z
+            .number()
+            .optional()
+            .describe("Number of words per page (default: 50)"),
+        },
+      },
+      async (args) => {
+        const { category, page = 1, limit = 50 } = args as {
+          category?: string;
+          page?: number;
+          limit?: number;
+        };
+
+        try {
+          const params = new URLSearchParams();
+          params.set("page", String(page));
+          params.set("limit", String(limit));
+          if (category) {
+            params.set("category", category);
+          }
+
+          const response = await fetch(
+            `${DAGLO_API_BASE}/user/dictionary?${params.toString()}`,
+            this.getAuthHeaders()
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch user dictionary: ${response.statusText}`
+            );
+          }
+
+          const data = (await response.json()) as unknown;
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ error }, "Get user dictionary failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "add-dictionary-word",
+      {
+        title: "Add Dictionary Word",
+        description: "Add a word to the user's custom dictionary",
+        inputSchema: {
+          word: z.string().min(1).describe("Word to add"),
+          pronunciation: z
+            .string()
+            .optional()
+            .describe("Pronunciation guide"),
+          definition: z.string().optional().describe("Word definition"),
+          category: z
+            .string()
+            .optional()
+            .describe("Dictionary category"),
+        },
+      },
+      async (args) => {
+        const { word, pronunciation, definition, category } = args as {
+          word: string;
+          pronunciation?: string;
+          definition?: string;
+          category?: string;
+        };
+
+        try {
+          const payload = { word, pronunciation, definition, category };
+
+          const response = await fetch(
+            `${DAGLO_API_BASE}/user/dictionary`,
+            {
+              method: "POST",
+              ...this.getAuthHeaders(),
+              body: JSON.stringify(payload),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to add dictionary word: ${response.statusText}`
+            );
+          }
+
+          const data = (await response.json()) as unknown;
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ word, error }, "Add dictionary word failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "delete-dictionary-word",
+      {
+        title: "Delete Dictionary Word",
+        description: "Delete a word from the user's custom dictionary",
+        inputSchema: {
+          wordId: z
+            .string()
+            .min(1)
+            .describe("Word ID to delete"),
+        },
+      },
+      async (args) => {
+        const { wordId } = args as { wordId: string };
+
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/user/dictionary/${wordId}`,
+            {
+              method: "DELETE",
+              ...this.getAuthHeaders(),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to delete dictionary word: ${response.statusText}`
+            );
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ success: true, message: "Word deleted" }),
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error({ wordId, error }, "Delete dictionary word failed");
+          throw error;
+        }
+      }
+    );
   }
 
   private getAuthHeaders(

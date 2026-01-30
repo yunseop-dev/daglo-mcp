@@ -9,6 +9,9 @@ MCP (Model Context Protocol) server for Daglo AI platform - speech-to-text trans
 - **Folder Organization**: Access folder structure
 - **Quota Tracking**: Check usage limits and quotas
 - **Plan Management**: View available subscription plans
+- **Bookmarks**: Create and retrieve bookmarks for specific timestamps in boards
+- **Notifications**: Get and manage user notifications
+- **User Dictionary**: Manage custom dictionary for specialized terminology
 
 ## Installation
 
@@ -234,6 +237,121 @@ npm run test:ui
 npm run test:coverage
 ```
 
+#### `get-bookmarks` (NEW)
+Retrieve all bookmarks from a specific board with optional pagination.
+
+**Parameters:**
+- `boardId` (string, required): Board ID to fetch bookmarks for
+- `page` (number, optional): Page number (default: 1)
+- `limit` (number, optional): Number of bookmarks per page (default: 50)
+
+**Example:**
+```json
+{
+  "boardId": "V3K8cTczuRrvLl2v",
+  "page": 1,
+  "limit": 50
+}
+```
+
+#### `create-bookmark` (NEW)
+Create a new bookmark in a board at a specific timestamp.
+
+**Parameters:**
+- `boardId` (string, required): Board ID to create bookmark in
+- `title` (string, required): Bookmark title
+- `timestamp` (number, optional): Timestamp in seconds
+- `description` (string, optional): Bookmark description
+
+**Example:**
+```json
+{
+  "boardId": "V3K8cTczuRrvLl2v",
+  "title": "Important discussion point",
+  "timestamp": 123.5,
+  "description": "Key moment to review"
+}
+```
+
+#### `get-notifications` (NEW)
+Retrieve user notifications with optional filtering by read status.
+
+**Parameters:**
+- `isRead` (boolean, optional): Filter by read status (true/false)
+- `page` (number, optional): Page number (default: 1)
+- `limit` (number, optional): Number of notifications per page (default: 20)
+
+**Example:**
+```json
+{
+  "isRead": false,
+  "page": 1,
+  "limit": 20
+}
+```
+
+#### `mark-notification-read` (NEW)
+Mark a notification as read.
+
+**Parameters:**
+- `notificationId` (string, required): Notification ID to mark as read
+
+**Example:**
+```json
+{
+  "notificationId": "notif-123"
+}
+```
+
+#### `get-user-dictionary` (NEW)
+Retrieve user's custom dictionary with optional filtering.
+
+**Parameters:**
+- `category` (string, optional): Filter by category
+- `page` (number, optional): Page number (default: 1)
+- `limit` (number, optional): Number of words per page (default: 50)
+
+**Example:**
+```json
+{
+  "category": "IT",
+  "page": 1,
+  "limit": 50
+}
+```
+
+#### `add-dictionary-word` (NEW)
+Add a word to the user's custom dictionary.
+
+**Parameters:**
+- `word` (string, required): Word to add
+- `pronunciation` (string, optional): Pronunciation guide
+- `definition` (string, optional): Word definition
+- `category` (string, optional): Dictionary category
+
+**Example:**
+```json
+{
+  "word": "AI",
+  "pronunciation": "ey-ahy",
+  "definition": "Artificial Intelligence",
+  "category": "IT"
+}
+```
+
+#### `delete-dictionary-word` (NEW)
+Delete a word from the user's custom dictionary.
+
+**Parameters:**
+- `wordId` (string, required): Word ID to delete
+
+**Example:**
+```json
+{
+  "wordId": "word-123"
+}
+```
+
 ## Test Coverage
 
 The project includes comprehensive tests for all MCP tools:
@@ -243,6 +361,9 @@ The project includes comprehensive tests for all MCP tools:
 - **Folder Tests**: Folder listing with and without root
 - **Quota Tests**: Usage quota retrieval
 - **Plan Tests**: Subscription plan information
+- **Bookmark Tests**: Bookmark retrieval and creation
+- **Notification Tests**: Notification retrieval and status management
+- **Dictionary Tests**: Dictionary word retrieval, addition, and deletion
 - **URL Construction**: URL building and parameter handling
 - **Type Validation**: Board status and type validation
 - **Error Handling**: Various HTTP error scenarios
