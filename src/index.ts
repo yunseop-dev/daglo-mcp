@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { inflateSync } from "node:zlib";
 import * as z from "zod";
 import {
@@ -14,6 +15,8 @@ import { logger, redactSensitiveData } from "./logger.js";
 
 const DAGLO_API_BASE = "https://backend.daglo.ai";
 const DAGLO_AI_CHAT_BASE_ENV = "DAGLO_AI_CHAT_BASE_URL";
+const DAGLO_AI_BEARER_TOKEN_ENV = "DAGLO_AI_BEARER_TOKEN";
+const DAGLO_AI_TOKEN_ENV = "DAGLO_AI_TOKEN";
 const DAGLO_EMAIL_ENV = "DAGLO_EMAIL";
 const DAGLO_PASSWORD_ENV = "DAGLO_PASSWORD";
 const DAGLO_REFRESH_TOKEN_ENV = "DAGLO_REFRESH_TOKEN";
@@ -28,6 +31,16 @@ const decodeZlibBase64Content = (value: string) => {
   } catch {
     return value;
   }
+};
+
+const normalizeScriptContent = (value: string) => {
+  if (!value) return value;
+  const decoded = decodeZlibBase64Content(value);
+  if (!decoded) return decoded;
+  if (decoded.trim().startsWith("{")) {
+    return decodeZlibBase64Content(decoded);
+  }
+  return decoded;
 };
 
 const normalizePath = (path: string) => {
@@ -186,6 +199,47 @@ const splitTokensByPunctuation = (tokens: KaraokeToken[]) => {
 
 const buildPlainTextFromTokens = (tokens: KaraokeToken[]) => {
   return tokens.map((token) => token.text).join("").trim();
+};
+
+const sanitizeFilename = (value: string) => {
+  if (!value) return "";
+  return value
+    .trim()
+    .replace(/[\/]/g, "-")
+    .replace(/[\u0000-\u001f]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+};
+
+const buildDefaultOutputPath = (baseName: string, extension: string) => {
+  const normalizedBase = sanitizeFilename(baseName) || "board-detail";
+  return resolve(process.cwd(), `${normalizedBase}.${extension}`);
+};
+
+const buildPlainTextFromScriptPayload = (
+  script: unknown,
+  fallbackContent?: string | null
+) => {
+  let sourceText = "";
+  if (script) {
+    try {
+      sourceText = JSON.stringify(script);
+    } catch {
+      sourceText = "";
+    }
+  }
+
+  if (!sourceText && fallbackContent) {
+    sourceText = fallbackContent;
+  }
+
+  if (!sourceText) return "";
+  const tokens = extractKaraokeTokens(sourceText);
+  let plainText = buildPlainTextFromTokens(tokens);
+  if (!plainText && fallbackContent) {
+    plainText = fallbackContent;
+  }
+  return plainText;
 };
 
 const decodeScriptItem = (value: unknown) => {
@@ -374,6 +428,8 @@ class DagloMcpServer {
   private server: McpServer;
   private accessToken?: string;
   private refreshToken?: string;
+  private aiBearerToken?: string;
+  private aiToken?: string;
 
   constructor() {
     this.server = new McpServer({
@@ -528,6 +584,12 @@ class DagloMcpServer {
             .string()
             .optional()
             .describe("Filter end date (ISO string)"),
+          folderId: z.string().optional().describe("Filter by a single folder ID"),
+          keyword: z.string().optional().describe("Filter by keyword"),
+          checkedFilter: z
+            .enum(["incompleteRecording", "isPdf"])
+            .optional()
+            .describe("Filter by incomplete recordings or PDFs"),
         },
       },
       async (args) => {
@@ -562,6 +624,9 @@ class DagloMcpServer {
         if (args.withDeleted !== undefined) {
           params.append("filter.withDeleted", String(args.withDeleted));
         }
+        if (args.folderId) params.append("folderId", args.folderId);
+        if (args.keyword) params.append("keyword", args.keyword);
+        if (args.checkedFilter) params.append("checkedFilter", args.checkedFilter);
 
         const response = await fetch(
           `${DAGLO_API_BASE}/v2/boards?${params.toString()}`,
@@ -580,6 +645,46 @@ class DagloMcpServer {
     );
 
     this.server.registerTool(
+      "get-board-info",
+      {
+        title: "Get Board Info",
+        description: "Retrieve board info for private or shared boards",
+        inputSchema: {
+          boardId: z
+            .string()
+            .optional()
+            .describe("Board ID to fetch (private board)"),
+          sharedBoardId: z
+            .string()
+            .optional()
+            .describe("Shared board ID to fetch (public)")
+        },
+      },
+      async (args) => {
+        if (!args.boardId && !args.sharedBoardId) {
+          throw new Error("Provide boardId or sharedBoardId.");
+        }
+
+        const path = args.sharedBoardId
+          ? `/shared-board/${args.sharedBoardId}`
+          : `/boards/${args.boardId}`;
+        const headers = args.sharedBoardId
+          ? { headers: { "daglo-platform": "web" } }
+          : this.getAuthHeaders();
+
+        const response = await fetch(`${DAGLO_API_BASE}${path}`, headers);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch board info: ${response.statusText}`);
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
       "get-board-detail",
       {
         title: "Get Board Detail",
@@ -591,6 +696,26 @@ class DagloMcpServer {
             .string()
             .optional()
             .describe("File metadata ID (optional)"),
+          decodeContent: z
+            .boolean()
+            .optional()
+            .describe("Decode content if zlib+base64 (default: true)"),
+          includeScript: z
+            .boolean()
+            .optional()
+            .describe("Include decoded script data when fileMetaId is set"),
+          includeScriptPages: z
+            .boolean()
+            .optional()
+            .describe("Include script pages when fileMetaId is set"),
+          scriptLimit: z
+            .number()
+            .optional()
+            .describe("Minutes per script page (default: 60)"),
+          scriptPage: z
+            .number()
+            .optional()
+            .describe("Script page index for API (default: 0)"),
           includeContent: z
             .boolean()
             .optional()
@@ -611,29 +736,63 @@ class DagloMcpServer {
             .boolean()
             .optional()
             .describe("Include timestamped segments (default: true)"),
+          outputFormat: z
+            .enum(["json", "text"])
+            .optional()
+            .describe("Output format (json or text, default: json)"),
+          outputPath: z
+            .string()
+            .optional()
+            .describe("Optional output file path when outputFormat is text/json"),
         },
       },
       async (args) => {
-        const params = new URLSearchParams();
-        if (args.includeContent !== false) params.append("includeContent", "true");
-        if (args.includeSummary !== false) params.append("includeSummary", "true");
-        if (args.includeKeywords !== false) params.append("includeKeywords", "true");
-        if (args.includeAiSummary !== false) params.append("includeAiSummary", "true");
-        if (args.includeSegments !== false) params.append("includeSegments", "true");
+        const shouldIncludeContent = args.includeContent !== false;
+        const shouldIncludeSummary = args.includeSummary !== false;
+        const shouldIncludeKeywords = args.includeKeywords !== false;
+        const shouldIncludeSegments = args.includeSegments !== false;
+        const shouldIncludeAiSummary = args.includeAiSummary !== false;
+        const shouldDecodeContent = args.decodeContent !== false;
+        const shouldIncludeScript = args.includeScript === true;
+        const shouldIncludeScriptPages = args.includeScriptPages !== false;
+        const scriptLimit = args.scriptLimit ?? 60;
+        const scriptPage = args.scriptPage ?? 0;
+        const outputFormat = args.outputFormat ?? "json";
+
+        let scriptPayload:
+          | {
+              meta?: { totalPages?: number } | null;
+              script?: Record<string, unknown> | null;
+              pages?: Array<Record<string, unknown>>;
+            }
+          | null = null;
 
         // Try file-meta API first (for script content)
         if (args.fileMetaId) {
+          const scriptQuery = new URLSearchParams();
+          scriptQuery.append("limit", scriptLimit.toString());
+          scriptQuery.append("page", scriptPage.toString());
           const scriptResponse = await fetch(
-            `${DAGLO_API_BASE}/file-meta/${args.fileMetaId}/script?${params.toString()}`,
+            `${DAGLO_API_BASE}/file-meta/${args.fileMetaId}/script?${scriptQuery.toString()}`,
             this.getAuthHeaders()
           );
 
           if (scriptResponse.ok) {
-            const scriptData = await scriptResponse.json();
-            return {
-              content: [
-                { type: "text", text: JSON.stringify(scriptData, null, 2) },
-              ],
+            const scriptData = (await scriptResponse.json()) as {
+              item?: string;
+              meta?: { totalPages?: number };
+            };
+            const script = decodeScriptItem(scriptData?.item);
+            const totalPages = scriptData?.meta?.totalPages ?? 1;
+            const pages =
+              script && shouldIncludeScriptPages
+                ? buildScriptPages(script, totalPages, scriptLimit)
+                : [];
+
+            scriptPayload = {
+              meta: scriptData?.meta ?? null,
+              script: shouldIncludeScript ? script : null,
+              pages: shouldIncludeScriptPages ? pages : undefined,
             };
           }
         }
@@ -652,7 +811,10 @@ class DagloMcpServer {
 
         const fullData = (await response.json()) as DagloBoardDetail;
 
-        const filteredData: Partial<DagloBoardDetail> = {
+        const filteredData: Partial<DagloBoardDetail> & {
+          decodedContent?: string | null;
+          contentDecoded?: boolean;
+        } = {
           id: fullData.id,
           name: fullData.name,
           status: fullData.status,
@@ -663,30 +825,141 @@ class DagloMcpServer {
           folderId: fullData.folderId,
         };
 
-        if (args.includeContent !== false && fullData.content) {
+        if (shouldIncludeContent && fullData.content) {
           filteredData.content = fullData.content;
+          if (shouldDecodeContent) {
+            const decoded = decodeZlibBase64Content(fullData.content);
+            filteredData.decodedContent = decoded;
+            filteredData.contentDecoded = decoded !== fullData.content;
+          }
         }
 
-        if (args.includeSummary !== false && fullData.summary) {
-          filteredData.summary = fullData.summary;
+        if (shouldIncludeSummary) {
+          let summaryData: unknown = null;
+          if (args.fileMetaId) {
+            const summaryResponse = await fetch(
+              `${DAGLO_API_BASE}/file-meta/${args.fileMetaId}/summary`,
+              this.getAuthHeaders()
+            );
+            if (summaryResponse.ok) {
+              summaryData = await parseResponseBody(summaryResponse);
+            }
+          }
+          (filteredData as Record<string, unknown>).summary =
+            summaryData ?? fullData.summary;
         }
 
-        if (args.includeKeywords !== false && fullData.keywords) {
-          filteredData.keywords = fullData.keywords;
+        if (shouldIncludeKeywords) {
+          let keywordsData: unknown = null;
+          if (args.fileMetaId) {
+            const keywordResponse = await fetch(
+              `${DAGLO_API_BASE}/file-meta/${args.fileMetaId}/keyword`,
+              this.getAuthHeaders()
+            );
+            if (keywordResponse.ok) {
+              keywordsData = await parseResponseBody(keywordResponse);
+            }
+          }
+          (filteredData as Record<string, unknown>).keywords =
+            keywordsData ?? fullData.keywords;
         }
 
-        if (args.includeAiSummary !== false && fullData.aiSummary) {
-          filteredData.aiSummary = fullData.aiSummary;
+        if (shouldIncludeAiSummary) {
+          let aiSummaryData: unknown = null;
+          if (args.fileMetaId) {
+            const longSummaryResponse = await fetch(
+              `${DAGLO_API_BASE}/file-meta/${args.fileMetaId}/long-summary`,
+              this.getAuthHeaders()
+            );
+            if (longSummaryResponse.ok) {
+              aiSummaryData = await parseResponseBody(longSummaryResponse);
+            }
+          }
+          (filteredData as Record<string, unknown>).aiSummary =
+            aiSummaryData ?? fullData.aiSummary;
         }
 
-        if (args.includeSegments !== false && fullData.segments) {
-          filteredData.segments = fullData.segments;
+        if (shouldIncludeSegments) {
+          let segmentData: unknown = null;
+          if (args.fileMetaId) {
+            const segmentResponse = await fetch(
+              `${DAGLO_API_BASE}/file-meta/${args.fileMetaId}/segment-summary`,
+              this.getAuthHeaders()
+            );
+            if (segmentResponse.ok) {
+              segmentData = await parseResponseBody(segmentResponse);
+            }
+          }
+          (filteredData as Record<string, unknown>).segments =
+            segmentData ?? fullData.segments;
+        }
+
+        if (scriptPayload && (shouldIncludeScript || shouldIncludeScriptPages)) {
+          (filteredData as Record<string, unknown>).script =
+            scriptPayload.script ?? undefined;
+          (filteredData as Record<string, unknown>).scriptPages =
+            scriptPayload.pages ?? undefined;
+          (filteredData as Record<string, unknown>).scriptMeta =
+            scriptPayload.meta ?? null;
+        }
+
+        if (outputFormat === "text") {
+          const normalizedContent = fullData.content
+            ? normalizeScriptContent(fullData.content)
+            : "";
+          const plainText = buildPlainTextFromScriptPayload(
+            scriptPayload?.script,
+            normalizedContent || filteredData.decodedContent || fullData.content
+          );
+          const outputPath =
+            args.outputPath ??
+            buildDefaultOutputPath(fullData.name ?? args.boardId, "txt");
+          const contentSource = scriptPayload?.script ? "script" : "content";
+
+          writeFileSync(outputPath, plainText, "utf8");
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    outputPath,
+                    contentLength: plainText.length,
+                    contentSource,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
+
+        const jsonText = JSON.stringify(filteredData, null, 2);
+        if (outputFormat === "json") {
+          const outputPath =
+            args.outputPath ??
+            buildDefaultOutputPath(fullData.name ?? args.boardId, "json");
+          writeFileSync(outputPath, jsonText, "utf8");
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    outputPath,
+                    contentLength: jsonText.length,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
         }
 
         return {
-          content: [
-            { type: "text", text: JSON.stringify(filteredData, null, 2) },
-          ],
+          content: [{ type: "text", text: jsonText }],
         };
       }
     );
@@ -950,13 +1223,9 @@ class DagloMcpServer {
           rawContent = detailData.content;
         }
 
-        const decodedContent = rawContent
-          ? decodeZlibBase64Content(rawContent)
+        const normalizedContent = rawContent
+          ? normalizeScriptContent(rawContent)
           : "";
-        const normalizedContent =
-          decodedContent && decodedContent.trim().startsWith("{")
-            ? decodeZlibBase64Content(decodedContent)
-            : decodedContent;
         const tokens = extractKaraokeTokens(normalizedContent);
 
         if (args.format === "punctuation-json") {
@@ -1136,6 +1405,77 @@ class DagloMcpServer {
     );
 
     this.server.registerTool(
+      "get-transcription-options",
+      {
+        title: "Get Transcription Options",
+        description: "Retrieve transcription options",
+        inputSchema: {},
+      },
+      async () => {
+        const response = await fetch(
+          `${DAGLO_API_BASE}/user-option/transcription`,
+          this.getAuthHeaders()
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch transcription options: ${response.statusText}`
+          );
+        }
+
+        const data = (await response.json()) as unknown;
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
+      "update-transcription-options",
+      {
+        title: "Update Transcription Options",
+        description: "Update transcription options",
+        inputSchema: {
+          speaker: z.boolean().optional().describe("Use speaker diarization"),
+          timestamp: z.boolean().optional().describe("Include timestamps"),
+          language: z.string().optional().describe("Transcription language"),
+          topic: z.string().optional().describe("Transcription topic"),
+          useDictionary: z.boolean().optional().describe("Use custom dictionary"),
+        },
+      },
+      async (args) => {
+        const requestBody: Record<string, unknown> = {};
+        if (args.speaker !== undefined)
+          requestBody.useSpeakerDiarization = args.speaker;
+        if (args.timestamp !== undefined) requestBody.timestamp = args.timestamp;
+        if (args.language) requestBody.language = args.language;
+        if (args.topic) requestBody.topic = args.topic;
+        if (args.useDictionary !== undefined)
+          requestBody.useDictionary = args.useDictionary;
+
+        const response = await fetch(
+          `${DAGLO_API_BASE}/user-option/transcription`,
+          {
+            method: "PATCH",
+            ...this.getAuthHeaders(),
+            body: JSON.stringify(requestBody),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to update transcription options: ${response.statusText}`
+          );
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
       "login",
       {
         title: "Login to Daglo",
@@ -1241,30 +1581,16 @@ class DagloMcpServer {
             .string()
             .min(1)
             .describe("Board ID to fetch bookmarks for"),
-          page: z
-            .number()
-            .optional()
-            .describe("Page number (default: 1)"),
-          limit: z
-            .number()
-            .optional()
-            .describe("Number of bookmarks per page (default: 50)"),
         },
       },
       async (args) => {
-        const { boardId, page = 1, limit = 50 } = args as {
+        const { boardId } = args as {
           boardId: string;
-          page?: number;
-          limit?: number;
         };
 
         try {
-          const params = new URLSearchParams();
-          params.set("page", String(page));
-          params.set("limit", String(limit));
-
           const response = await fetch(
-            `${DAGLO_API_BASE}/v2/boards/${boardId}/bookmarks?${params.toString()}`,
+            `${DAGLO_API_BASE}/boards/${boardId}`,
             this.getAuthHeaders()
           );
 
@@ -1274,9 +1600,14 @@ class DagloMcpServer {
             );
           }
 
-          const data = (await response.json()) as unknown;
+          const data = (await response.json()) as { bookmarks?: unknown };
           return {
-            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(data.bookmarks ?? [], null, 2),
+              },
+            ],
           };
         } catch (error) {
           logger.error({ boardId, error }, "Get bookmarks failed");
@@ -1295,30 +1626,33 @@ class DagloMcpServer {
             .string()
             .min(1)
             .describe("Board ID to create bookmark in"),
-          title: z.string().min(1).describe("Bookmark title"),
+          starts: z
+            .number()
+            .optional()
+            .describe("Start time in seconds"),
           timestamp: z
             .number()
             .optional()
-            .describe("Timestamp in seconds"),
-          description: z
-            .string()
-            .optional()
-            .describe("Bookmark description"),
+            .describe("Timestamp in seconds (alias for starts)"),
         },
       },
       async (args) => {
-        const { boardId, title, timestamp, description } = args as {
+        const { boardId, starts, timestamp } = args as {
           boardId: string;
-          title: string;
+          starts?: number;
           timestamp?: number;
-          description?: string;
         };
 
+        const bookmarkStarts = starts ?? timestamp;
+        if (bookmarkStarts === undefined) {
+          throw new Error("Provide starts or timestamp.");
+        }
+
         try {
-          const payload = { title, timestamp, description };
+          const payload = { boardId, starts: bookmarkStarts };
 
           const response = await fetch(
-            `${DAGLO_API_BASE}/v2/boards/${boardId}/bookmarks`,
+            `${DAGLO_API_BASE}/bookmark`,
             {
               method: "POST",
               ...this.getAuthHeaders(),
@@ -1337,7 +1671,50 @@ class DagloMcpServer {
             content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
           };
         } catch (error) {
-          logger.error({ boardId, title, error }, "Create bookmark failed");
+          logger.error({ boardId, error }, "Create bookmark failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "delete-bookmark",
+      {
+        title: "Delete Bookmark",
+        description: "Delete a bookmark from a board",
+        inputSchema: {
+          boardId: z.string().min(1).describe("Board ID"),
+          starts: z.number().describe("Bookmark start time in seconds"),
+          ends: z.number().describe("Bookmark end time in seconds"),
+        },
+      },
+      async (args) => {
+        try {
+          const response = await fetch(`${DAGLO_API_BASE}/bookmark`, {
+            method: "DELETE",
+            ...this.getAuthHeaders(),
+            body: JSON.stringify({
+              boardId: args.boardId,
+              starts: args.starts,
+              ends: args.ends,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to delete bookmark: ${response.statusText}`
+            );
+          }
+
+          const data = await parseResponseBody(response);
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error(
+            { boardId: args.boardId, error },
+            "Delete bookmark failed"
+          );
           throw error;
         }
       }
@@ -1403,6 +1780,40 @@ class DagloMcpServer {
     );
 
     this.server.registerTool(
+      "mark-all-notifications-read",
+      {
+        title: "Mark All Notifications Read",
+        description: "Mark all notifications as read",
+        inputSchema: {},
+      },
+      async () => {
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/notifications/mark-as-all-read`,
+            {
+              method: "PATCH",
+              ...this.getAuthHeaders(),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to mark all notifications as read: ${response.statusText}`
+            );
+          }
+
+          const data = (await response.json()) as unknown;
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ error }, "Mark all notifications read failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
       "mark-notification-read",
       {
         title: "Mark Notification Read",
@@ -1419,9 +1830,9 @@ class DagloMcpServer {
 
         try {
           const response = await fetch(
-            `${DAGLO_API_BASE}/notifications/${notificationId}/read`,
+            `${DAGLO_API_BASE}/notifications/${notificationId}/mark-as-read`,
             {
-              method: "PUT",
+              method: "PATCH",
               ...this.getAuthHeaders(),
             }
           );
@@ -1483,7 +1894,7 @@ class DagloMcpServer {
           }
 
           const response = await fetch(
-            `${DAGLO_API_BASE}/user/dictionary?${params.toString()}`,
+            `${DAGLO_API_BASE}/user-word?${params.toString()}`,
             this.getAuthHeaders()
           );
 
@@ -1523,7 +1934,7 @@ class DagloMcpServer {
         },
       },
       async (args) => {
-        const { word, pronunciation, definition, category } = args as {
+        const { word } = args as {
           word: string;
           pronunciation?: string;
           definition?: string;
@@ -1531,10 +1942,10 @@ class DagloMcpServer {
         };
 
         try {
-          const payload = { word, pronunciation, definition, category };
+          const payload = { words: [word] };
 
           const response = await fetch(
-            `${DAGLO_API_BASE}/user/dictionary`,
+            `${DAGLO_API_BASE}/user-word`,
             {
               method: "POST",
               ...this.getAuthHeaders(),
@@ -1568,18 +1979,51 @@ class DagloMcpServer {
           wordId: z
             .string()
             .min(1)
-            .describe("Word ID to delete"),
+            .optional()
+            .describe("Word ID to delete (legacy)"),
+          word: z
+            .string()
+            .optional()
+            .describe("Word to delete (recommended)"),
         },
       },
       async (args) => {
-        const { wordId } = args as { wordId: string };
+        const { wordId, word } = args as { wordId?: string; word?: string };
 
         try {
+          if (!word && !wordId) {
+            throw new Error("Provide word or wordId.");
+          }
+
+          if (word) {
+            const response = await fetch(`${DAGLO_API_BASE}/user-word`, {
+              method: "DELETE",
+              ...this.getAuthHeaders(),
+              body: JSON.stringify({ words: [word] }),
+            });
+
+            if (!response.ok) {
+              throw new Error(
+                `Failed to delete dictionary word: ${response.statusText}`
+              );
+            }
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ success: true, message: "Word deleted" }),
+                },
+              ],
+            };
+          }
+
           const response = await fetch(
-            `${DAGLO_API_BASE}/user/dictionary/${wordId}`,
+            `${DAGLO_API_BASE}/user-word`,
             {
               method: "DELETE",
               ...this.getAuthHeaders(),
+              body: JSON.stringify({ words: [wordId] }),
             }
           );
 
@@ -1695,6 +2139,158 @@ class DagloMcpServer {
           };
         } catch (error) {
           logger.error({ error }, "Update user profile failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "check-user-password",
+      {
+        title: "Check User Password",
+        description: "Verify user password",
+        inputSchema: {
+          password: z.string().min(1).describe("Password to verify"),
+        },
+      },
+      async (args) => {
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/user/password-check`,
+            {
+              method: "POST",
+              ...this.getAuthHeaders(),
+              body: JSON.stringify({ password: args.password }),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`Failed to verify password: ${response.statusText}`);
+          }
+
+          const data = await parseResponseBody(response);
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ error }, "Check user password failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "change-user-password",
+      {
+        title: "Change User Password",
+        description: "Change user password",
+        inputSchema: {
+          currentPassword: z.string().min(1).describe("Current password"),
+          newPassword: z.string().min(1).describe("New password"),
+        },
+      },
+      async (args) => {
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/v2/user/mypage/password`,
+            {
+              method: "PATCH",
+              ...this.getAuthHeaders(),
+              body: JSON.stringify({
+                currentPassword: args.currentPassword,
+                newPassword: args.newPassword,
+              }),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`Failed to change password: ${response.statusText}`);
+          }
+
+          const data = await parseResponseBody(response);
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ error }, "Change user password failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "withdraw-user",
+      {
+        title: "Withdraw User",
+        description: "Withdraw user account",
+        inputSchema: {
+          deletionReasons: z
+            .array(
+              z.object({
+                reason: z.string().min(1),
+                description: z.string().min(1),
+              })
+            )
+            .describe("Withdrawal reasons"),
+        },
+      },
+      async (args) => {
+        try {
+          const response = await fetch(`${DAGLO_API_BASE}/user/delete`, {
+            method: "PATCH",
+            ...this.getAuthHeaders(),
+            body: JSON.stringify({ deletionReasons: args.deletionReasons }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to withdraw user: ${response.statusText}`);
+          }
+
+          const data = await parseResponseBody(response);
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ error }, "Withdraw user failed");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "unlink-user-provider",
+      {
+        title: "Unlink User Provider",
+        description: "Unlink social provider from user account",
+        inputSchema: {
+          provider: z
+            .enum(["google", "apple", "facebook", "kakao", "naver"])
+            .describe("Provider to unlink"),
+        },
+      },
+      async (args) => {
+        const params = new URLSearchParams();
+        params.append("provider", args.provider);
+
+        try {
+          const response = await fetch(
+            `${DAGLO_API_BASE}/user/unlink?${params.toString()}`,
+            {
+              method: "PATCH",
+              ...this.getAuthHeaders(),
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`Failed to unlink provider: ${response.statusText}`);
+          }
+
+          const data = await parseResponseBody(response);
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        } catch (error) {
+          logger.error({ error }, "Unlink user provider failed");
           throw error;
         }
       }
@@ -1835,6 +2431,182 @@ class DagloMcpServer {
           logger.error({ error }, "Update notification option failed");
           throw error;
         }
+      }
+    );
+
+    this.server.registerTool(
+      "get-file-meta",
+      {
+        title: "Get File Meta",
+        description: "Retrieve file metadata for a file",
+        inputSchema: {
+          fileMetaId: z.string().describe("File metadata ID"),
+        },
+      },
+      async (args) => {
+        const response = await fetch(
+          `${DAGLO_API_BASE}/file-meta/${args.fileMetaId}`,
+          this.getAuthHeaders()
+        );
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file meta: ${response.statusText}`);
+        }
+
+        const data = (await response.json()) as unknown;
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
+      "get-summary",
+      {
+        title: "Get Summary",
+        description: "Retrieve summary for a board",
+        inputSchema: {
+          fileMetaId: z.string().optional().describe("File metadata ID"),
+          sharedBoardId: z
+            .string()
+            .optional()
+            .describe("Shared board ID"),
+        },
+      },
+      async (args) => {
+        if (!args.fileMetaId && !args.sharedBoardId) {
+          throw new Error("Provide fileMetaId or sharedBoardId.");
+        }
+
+        const path = args.sharedBoardId
+          ? `/shared-board/${args.sharedBoardId}/summary`
+          : `/file-meta/${args.fileMetaId}/summary`;
+        const headers = args.sharedBoardId
+          ? { headers: { "daglo-platform": "web" } }
+          : this.getAuthHeaders();
+
+        const response = await fetch(`${DAGLO_API_BASE}${path}`, headers);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch summary: ${response.statusText}`);
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
+      "get-segment-summary",
+      {
+        title: "Get Segment Summary",
+        description: "Retrieve segment summary for a board",
+        inputSchema: {
+          fileMetaId: z.string().optional().describe("File metadata ID"),
+          sharedBoardId: z
+            .string()
+            .optional()
+            .describe("Shared board ID"),
+        },
+      },
+      async (args) => {
+        if (!args.fileMetaId && !args.sharedBoardId) {
+          throw new Error("Provide fileMetaId or sharedBoardId.");
+        }
+
+        const path = args.sharedBoardId
+          ? `/shared-board/${args.sharedBoardId}/segment-summary`
+          : `/file-meta/${args.fileMetaId}/segment-summary`;
+        const headers = args.sharedBoardId
+          ? { headers: { "daglo-platform": "web" } }
+          : this.getAuthHeaders();
+
+        const response = await fetch(`${DAGLO_API_BASE}${path}`, headers);
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch segment summary: ${response.statusText}`
+          );
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
+      "get-keywords",
+      {
+        title: "Get Keywords",
+        description: "Retrieve keywords for a board",
+        inputSchema: {
+          fileMetaId: z.string().optional().describe("File metadata ID"),
+          sharedBoardId: z
+            .string()
+            .optional()
+            .describe("Shared board ID"),
+        },
+      },
+      async (args) => {
+        if (!args.fileMetaId && !args.sharedBoardId) {
+          throw new Error("Provide fileMetaId or sharedBoardId.");
+        }
+
+        const path = args.sharedBoardId
+          ? `/shared-board/${args.sharedBoardId}/keyword`
+          : `/file-meta/${args.fileMetaId}/keyword`;
+        const headers = args.sharedBoardId
+          ? { headers: { "daglo-platform": "web" } }
+          : this.getAuthHeaders();
+
+        const response = await fetch(`${DAGLO_API_BASE}${path}`, headers);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch keywords: ${response.statusText}`);
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
+      "get-long-summary",
+      {
+        title: "Get Long Summary",
+        description: "Retrieve long summary for a board",
+        inputSchema: {
+          fileMetaId: z.string().optional().describe("File metadata ID"),
+          sharedBoardId: z
+            .string()
+            .optional()
+            .describe("Shared board ID"),
+        },
+      },
+      async (args) => {
+        if (!args.fileMetaId && !args.sharedBoardId) {
+          throw new Error("Provide fileMetaId or sharedBoardId.");
+        }
+
+        const path = args.sharedBoardId
+          ? `/shared-board/${args.sharedBoardId}/long-summary`
+          : `/file-meta/${args.fileMetaId}/long-summary`;
+        const headers = args.sharedBoardId
+          ? { headers: { "daglo-platform": "web" } }
+          : this.getAuthHeaders();
+
+        const response = await fetch(`${DAGLO_API_BASE}${path}`, headers);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch long summary: ${response.statusText}`);
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
       }
     );
 
@@ -2065,6 +2837,242 @@ class DagloMcpServer {
         }
       }
     );
+
+    this.server.registerTool(
+      "get-shared-board-thumbnail",
+      {
+        title: "Get Shared Board Thumbnail",
+        description: "Retrieve shared board thumbnail",
+        inputSchema: {
+          shareId: z.string().describe("Shared board ID"),
+        },
+      },
+      async (args) => {
+        const response = await fetch(
+          `${DAGLO_API_BASE}/shared-board/${args.shareId}/thumbnail`,
+          {
+            headers: { "daglo-platform": "web" },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch shared board thumbnail: ${response.statusText}`
+          );
+        }
+
+        const contentType = response.headers.get("content-type");
+        const buffer = await response.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString("base64");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  contentType,
+                  base64,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    );
+
+    this.server.registerTool(
+      "get-shared-segment-summary",
+      {
+        title: "Get Shared Segment Summary",
+        description: "Retrieve shared segment summary",
+        inputSchema: {
+          sharedId: z.string().describe("Shared board ID"),
+        },
+      },
+      async (args) => {
+        const response = await fetch(
+          `${DAGLO_API_BASE}/shared-board/${args.sharedId}/segment-summary`,
+          {
+            headers: { "daglo-platform": "web" },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch shared segment summary: ${response.statusText}`
+          );
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    // AI Chat tools
+    this.server.registerTool(
+      "get-ai-chat-board",
+      {
+        title: "Get AI Chat Board Conversation",
+        description: "Fetch board conversation (AI chat)",
+        inputSchema: {
+          id: z.string().min(1).describe("Board ID or transcript request ID"),
+        },
+      },
+      async (args) => {
+        const baseUrl = process.env[DAGLO_AI_CHAT_BASE_ENV];
+        if (!baseUrl) {
+          throw new Error(
+            `Missing AI chat base URL. Set ${DAGLO_AI_CHAT_BASE_ENV}.`
+          );
+        }
+
+        const url = buildUrl(baseUrl, "/conversation/board", { id: args.id });
+        const response = await fetch(url, this.getAiHeaders("aiBearerToken"));
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch AI board conversation: ${response.statusText}`
+          );
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
+      "get-ai-chat-pdf",
+      {
+        title: "Get AI Chat PDF Conversation",
+        description: "Fetch PDF conversation (AI chat)",
+        inputSchema: {
+          id: z.string().min(1).describe("PDF board ID or file ID"),
+        },
+      },
+      async (args) => {
+        const baseUrl = process.env[DAGLO_AI_CHAT_BASE_ENV];
+        if (!baseUrl) {
+          throw new Error(
+            `Missing AI chat base URL. Set ${DAGLO_AI_CHAT_BASE_ENV}.`
+          );
+        }
+
+        const url = buildUrl(baseUrl, "/conversation/pdf-board", { id: args.id });
+        const response = await fetch(url, this.getAiHeaders("aiBearerToken"));
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch AI PDF conversation: ${response.statusText}`
+          );
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
+      "create-ai-chat-board",
+      {
+        title: "Create AI Chat Board Message",
+        description: "Create board chat (AI chat)",
+        inputSchema: {
+          content: z.string().min(1).describe("Message content"),
+          boardId: z.string().min(1).describe("Board ID"),
+          transcriptRequestId: z
+            .string()
+            .optional()
+            .describe("Transcript request ID"),
+          fileId: z.string().optional().describe("File ID"),
+        },
+      },
+      async (args) => {
+        const baseUrl = process.env[DAGLO_AI_CHAT_BASE_ENV];
+        if (!baseUrl) {
+          throw new Error(
+            `Missing AI chat base URL. Set ${DAGLO_AI_CHAT_BASE_ENV}.`
+          );
+        }
+
+        const url = buildUrl(baseUrl, "/conversation/board");
+        const response = await fetch(url, {
+          method: "POST",
+          ...this.getAiHeaders("aiToken"),
+          body: JSON.stringify({
+            content: args.content,
+            boardId: args.boardId,
+            transcriptRequestId: args.transcriptRequestId,
+            fileId: args.fileId,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to create AI board chat: ${response.statusText}`
+          );
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
+      "create-ai-chat-pdf",
+      {
+        title: "Create AI Chat PDF Message",
+        description: "Create PDF chat (AI chat)",
+        inputSchema: {
+          content: z.string().min(1).describe("Message content"),
+          boardId: z.string().min(1).describe("PDF board ID"),
+          transcriptRequestId: z
+            .string()
+            .optional()
+            .describe("Transcript request ID"),
+          fileId: z.string().optional().describe("File ID"),
+        },
+      },
+      async (args) => {
+        const baseUrl = process.env[DAGLO_AI_CHAT_BASE_ENV];
+        if (!baseUrl) {
+          throw new Error(
+            `Missing AI chat base URL. Set ${DAGLO_AI_CHAT_BASE_ENV}.`
+          );
+        }
+
+        const url = buildUrl(baseUrl, "/conversation/pdf-board");
+        const response = await fetch(url, {
+          method: "POST",
+          ...this.getAiHeaders("aiToken"),
+          body: JSON.stringify({
+            content: args.content,
+            boardId: args.boardId,
+            transcriptRequestId: args.transcriptRequestId,
+            fileId: args.fileId,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to create AI PDF chat: ${response.statusText}`);
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
   }
 
   private getAuthHeaders(
@@ -2101,6 +3109,49 @@ class DagloMcpServer {
       );
     } else if (authType !== "none") {
       logger.warn("Auth headers generated without access token");
+    }
+
+    return { headers };
+  }
+
+  private getAiHeaders(
+    authType: "aiBearerToken" | "aiToken" = "aiBearerToken"
+  ) {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+      "daglo-platform": "web",
+    };
+
+    const headersObj = headers as Record<string, string>;
+
+    if (authType === "aiBearerToken") {
+      if (!this.aiBearerToken) {
+        this.aiBearerToken = process.env[DAGLO_AI_BEARER_TOKEN_ENV];
+      }
+      if (this.aiBearerToken) {
+        headersObj["Authorization"] = `bearer ${this.aiBearerToken}`;
+        logger.debug(
+          { hasAiBearerToken: true, tokenLength: this.aiBearerToken.length },
+          "AI bearer auth headers generated"
+        );
+      } else {
+        logger.warn("AI bearer auth headers requested without token");
+      }
+    }
+
+    if (authType === "aiToken") {
+      if (!this.aiToken) {
+        this.aiToken = process.env[DAGLO_AI_TOKEN_ENV];
+      }
+      if (this.aiToken) {
+        headersObj["Authorization"] = `Token ${this.aiToken}`;
+        logger.debug(
+          { hasAiToken: true, tokenLength: this.aiToken.length },
+          "AI token auth headers generated"
+        );
+      } else {
+        logger.warn("AI token auth headers requested without token");
+      }
     }
 
     return { headers };
