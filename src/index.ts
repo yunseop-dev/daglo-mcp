@@ -6,6 +6,7 @@ import { registerBoardTools } from "./tools/boards.js";
 import { registerFileMetaTools } from "./tools/file-meta.js";
 import { registerFolderTools } from "./tools/folders.js";
 import { registerObsidianTools } from "./tools/obsidian.js";
+import { registerVideoTools } from "./tools/video.js";
 
 const server = new McpServer({
   name: "daglo-mcp-server",
@@ -19,6 +20,7 @@ registerFolderTools(server, client);
 registerAuthTools(server, client);
 registerFileMetaTools(server, client);
 registerObsidianTools(server, client);
+registerVideoTools(server, client);
 
 async function main() {
   const transport = new StdioServerTransport();

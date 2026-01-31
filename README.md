@@ -9,6 +9,7 @@ MCP (Model Context Protocol) server for Daglo AI platform - speech-to-text trans
 - **Folder Organization**: Access folder structure
 - **Content Export**: Export board content to various formats
 - **Obsidian Export**: Export boards to Obsidian-compatible markdown with YAML frontmatter
+- **Video Highlights**: Generate YouTube highlight clips with burned-in subtitles
 
 ## Installation
 
@@ -219,6 +220,33 @@ Export all boards in a folder to Obsidian markdown.
 }
 ```
 
+#### `create-youtube-highlight-clip`
+Download a YouTube video, select a highlight segment based on board transcript keywords, and output a burned-in subtitle clip.
+
+**Parameters:**
+- `youtubeUrl` (string, required): YouTube video URL to download
+- `boardId` (string, optional): Board ID to fetch transcript from
+- `fileMetaId` (string, optional): File metadata ID (takes precedence over boardId)
+- `outputDir` (string, optional): Output directory (default: "./docs/clips")
+- `clipLengthMinutes` (number, optional): Target clip length in minutes (default: 3.5)
+- `highlightKeywords` (string[], optional): Override keywords for highlight selection
+
+**Example:**
+```json
+{
+  "youtubeUrl": "https://youtu.be/vMmEF5OYZds",
+  "boardId": "KXl_F8J7oTS1FURF",
+  "outputDir": "./docs/clips",
+  "clipLengthMinutes": 3.5
+}
+```
+
+**Output:**
+- `{outputDir}/video_full.mp4` (downloaded source video)
+- `{outputDir}/clip_no_subs.mp4` (highlight clip without subtitles)
+- `{outputDir}/subtitles.srt` (generated subtitles)
+- `{outputDir}/clip_with_subs.mp4` (final clip with burned-in subtitles)
+
 ## API Endpoints
 
 The server interacts with the following Daglo API endpoints:
@@ -226,6 +254,7 @@ The server interacts with the following Daglo API endpoints:
 - `POST https://backend.daglo.ai/user/login` - Authentication
 - `GET https://backend.daglo.ai/v2/boards` - List boards
 - `GET https://backend.daglo.ai/v2/boards/{id}` - Board details
+- `GET https://backend.daglo.ai/boards/{id}` - Board info
 - `GET https://backend.daglo.ai/folders` - List folders
 - `GET https://backend.daglo.ai/file-meta/{id}` - File metadata
 - `GET https://backend.daglo.ai/file-meta/{id}/script` - Board script
@@ -254,7 +283,8 @@ src/
     ├── folders.ts     # Folder tools (1 tool)
     ├── auth.ts        # Authentication tools (1 tool)
     ├── file-meta.ts   # File metadata tools (2 tools)
-    └── obsidian.ts    # Obsidian export tools (2 tools)
+    ├── obsidian.ts    # Obsidian export tools (2 tools)
+    └── video.ts       # Video highlight tools (1 tool)
 ```
 
 ## Development
