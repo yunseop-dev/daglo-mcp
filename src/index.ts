@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { inflateSync } from "node:zlib";
 import * as z from "zod";
@@ -422,6 +422,90 @@ const getRefreshTokenFromResponse = (
   );
 
   return token;
+};
+
+// Obsidian export helper functions
+const formatDateForFilename = (dateStr: string) => {
+  const date = new Date(dateStr);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const generateFrontmatter = (options: {
+  title: string;
+  date: string;
+  tags: string[];
+  keywords: string[];
+  boardId: string;
+  created: string;
+}) => {
+  return `---
+title: "${options.title}"
+date: ${formatDateForFilename(options.date)}
+tags: [${options.tags.join(', ')}]
+keywords: [${options.keywords.join(', ')}]
+source: daglo
+board_id: ${options.boardId}
+created: ${options.created}
+---`;
+};
+
+const formatOriginalContent = (content: string) => {
+  if (!content) return '';
+  // Split by sentence endings and add paragraph breaks
+  return content
+    .split(/(?<=[.?!])\s+/)
+    .filter(s => s.trim())
+    .reduce((acc, sentence, i, arr) => {
+      acc += sentence;
+      // Add paragraph break every 3-5 sentences for readability
+      if ((i + 1) % 4 === 0 && i < arr.length - 1) {
+        acc += '\n\n';
+      } else if (i < arr.length - 1) {
+        acc += ' ';
+      }
+      return acc;
+    }, '');
+};
+
+const formatSummaryContent = (options: {
+  title: string;
+  originalFilename: string;
+  summary?: string;
+  aiSummary?: string;
+  keywords?: string[];
+  segments?: Array<{ startTime: number; endTime: number; text: string; speaker?: string }>;
+}) => {
+  let content = `# ${options.title}\n\n`;
+  
+  // Link to original
+  content += `> [!info] 원본 노트\n> [[original/${options.originalFilename}]]\n\n`;
+  
+  // AI Summary callout
+  if (options.aiSummary) {
+    content += `> [!summary] AI 요약\n> ${options.aiSummary.split('\n').join('\n> ')}\n\n`;
+  }
+  
+  // Short summary
+  if (options.summary) {
+    content += `## 요약\n${options.summary}\n\n`;
+  }
+  
+  // Keywords as inline tags
+  if (options.keywords?.length) {
+    content += `## 키워드\n${options.keywords.map(k => `#${k.replace(/\s+/g, '_')}`).join(' ')}\n\n`;
+  }
+  
+  // Segments with timestamps
+  if (options.segments?.length) {
+    content += `## 타임스탬프\n`;
+    options.segments.forEach(seg => {
+      const mins = Math.floor(seg.startTime / 60);
+      const secs = Math.floor(seg.startTime % 60);
+      content += `- **${mins}:${String(secs).padStart(2, '0')}** ${seg.text}\n`;
+    });
+  }
+  
+  return content;
 };
 
 class DagloMcpServer {
@@ -3105,6 +3189,430 @@ class DagloMcpServer {
         return {
           content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
         };
+      }
+    );
+
+    this.server.registerTool(
+      "export-to-obsidian",
+      {
+        title: "Export Board to Obsidian",
+        description: "Export a single board to Obsidian-compatible markdown",
+        inputSchema: {
+          boardId: z.string().describe("Board ID to export"),
+          fileMetaId: z.string().optional().describe("File metadata ID"),
+          outputType: z
+            .enum(["original", "summary", "both"])
+            .optional()
+            .default("both")
+            .describe("Output type"),
+          outputDir: z
+            .string()
+            .optional()
+            .describe("Output directory (default: ./docs)"),
+          includeContent: z.boolean().optional().default(true),
+          includeSummary: z.boolean().optional().default(true),
+          includeKeywords: z.boolean().optional().default(true),
+          includeAiSummary: z.boolean().optional().default(true),
+        },
+      },
+      async (args) => {
+        try {
+          const outputDir = args.outputDir || "./docs";
+          const outputType = args.outputType || "both";
+
+          const url = buildUrl(DAGLO_API_BASE, `/v2/boards/${args.boardId}`);
+          const response = await fetch(url, this.getAuthHeaders());
+
+          if (!response.ok) {
+            throw new Error(`Failed to fetch board: ${response.statusText}`);
+          }
+
+          const boardData = (await parseResponseBody(response)) as {
+            id: string;
+            name: string;
+            createdAt: string;
+            content?: string;
+            summary?: string;
+            keywords?: string[];
+            aiSummary?: string;
+          };
+
+          if (!boardData) {
+            throw new Error("Failed to parse board data");
+          }
+
+          let content = boardData.content;
+          if (content) {
+            content = decodeZlibBase64Content(content);
+          }
+
+          let summary = boardData.summary;
+          let keywords = boardData.keywords || [];
+          let aiSummary = boardData.aiSummary;
+          let segments: Array<{
+            startTime: number;
+            endTime: number;
+            text: string;
+            speaker?: string;
+          }> = [];
+
+          if (args.fileMetaId) {
+            if (args.includeSummary) {
+              const summaryUrl = buildUrl(
+                DAGLO_API_BASE,
+                `/file-meta/${args.fileMetaId}/summary`
+              );
+              const summaryResponse = await fetch(
+                summaryUrl,
+                this.getAuthHeaders()
+              );
+              if (summaryResponse.ok) {
+                const summaryData = (await parseResponseBody(
+                  summaryResponse
+                )) as { summary?: string };
+                summary = summaryData?.summary || summary;
+              }
+            }
+
+            if (args.includeKeywords) {
+              const keywordsUrl = buildUrl(
+                DAGLO_API_BASE,
+                `/file-meta/${args.fileMetaId}/keywords`
+              );
+              const keywordsResponse = await fetch(
+                keywordsUrl,
+                this.getAuthHeaders()
+              );
+              if (keywordsResponse.ok) {
+                const keywordsData = (await parseResponseBody(
+                  keywordsResponse
+                )) as { keywords?: string[] };
+                keywords = keywordsData?.keywords || keywords;
+              }
+            }
+
+            if (args.includeAiSummary) {
+              const aiSummaryUrl = buildUrl(
+                DAGLO_API_BASE,
+                `/file-meta/${args.fileMetaId}/long-summary`
+              );
+              const aiSummaryResponse = await fetch(
+                aiSummaryUrl,
+                this.getAuthHeaders()
+              );
+              if (aiSummaryResponse.ok) {
+                const aiSummaryData = (await parseResponseBody(
+                  aiSummaryResponse
+                )) as { longSummary?: string };
+                aiSummary = aiSummaryData?.longSummary || aiSummary;
+              }
+            }
+
+            const segmentsUrl = buildUrl(
+              DAGLO_API_BASE,
+              `/file-meta/${args.fileMetaId}/segment-summary`
+            );
+            const segmentsResponse = await fetch(
+              segmentsUrl,
+              this.getAuthHeaders()
+            );
+            if (segmentsResponse.ok) {
+              const segmentsData = (await parseResponseBody(
+                segmentsResponse
+              )) as {
+                segments?: Array<{
+                  startTime: number;
+                  endTime: number;
+                  text: string;
+                  speaker?: string;
+                }>;
+              };
+              segments = segmentsData?.segments || [];
+            }
+          }
+
+          const dateForFilename = formatDateForFilename(boardData.createdAt);
+          const sanitizedName = sanitizeFilename(boardData.name);
+          const baseFilename = `${dateForFilename} ${sanitizedName}`;
+
+          const tags = ["journal", "daglo"];
+          const frontmatter = generateFrontmatter({
+            title: boardData.name,
+            date: boardData.createdAt,
+            tags,
+            keywords,
+            boardId: boardData.id,
+            created: boardData.createdAt,
+          });
+
+          const generatedFiles: string[] = [];
+
+          if (
+            (outputType === "original" || outputType === "both") &&
+            content
+          ) {
+            const originalDir = resolve(outputDir, "original");
+            mkdirSync(originalDir, { recursive: true });
+
+            const originalFilePath = resolve(
+              originalDir,
+              `${baseFilename}.md`
+            );
+            const formattedContent = formatOriginalContent(content);
+            const fullContent = `${frontmatter}\n\n${formattedContent}`;
+
+            writeFileSync(originalFilePath, fullContent, "utf-8");
+            generatedFiles.push(originalFilePath);
+          }
+
+          if (outputType === "summary" || outputType === "both") {
+            const summaryDir = resolve(outputDir, "summary");
+            mkdirSync(summaryDir, { recursive: true });
+
+            const summaryFilePath = resolve(summaryDir, `${baseFilename}.md`);
+            const summaryContentBody = formatSummaryContent({
+              title: boardData.name,
+              originalFilename: `${baseFilename}.md`,
+              summary,
+              aiSummary,
+              keywords,
+              segments,
+            });
+            const fullSummaryContent = `${frontmatter}\n\n${summaryContentBody}`;
+
+            writeFileSync(summaryFilePath, fullSummaryContent, "utf-8");
+            generatedFiles.push(summaryFilePath);
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    success: true,
+                    boardId: boardData.id,
+                    boardName: boardData.name,
+                    generatedFiles,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          logger.error({ error: errorMessage }, "Failed to export to Obsidian");
+          throw error;
+        }
+      }
+    );
+
+    this.server.registerTool(
+      "batch-export-folder",
+      {
+        title: "Batch Export Folder to Obsidian",
+        description: "Export all boards in a folder to Obsidian markdown",
+        inputSchema: {
+          folderId: z.string().describe("Folder ID to export"),
+          outputDir: z
+            .string()
+            .optional()
+            .describe("Output directory (default: ./docs)"),
+          outputType: z
+            .enum(["original", "summary", "both"])
+            .optional()
+            .default("both")
+            .describe("Output type"),
+          limit: z
+            .number()
+            .optional()
+            .default(50)
+            .describe("Max boards to export"),
+        },
+      },
+      async (args) => {
+        try {
+          const outputDir = args.outputDir || "./docs";
+          const outputType = args.outputType || "both";
+          const limit = args.limit || 50;
+
+          const url = buildUrl(DAGLO_API_BASE, "/v2/boards", {
+            folderId: args.folderId,
+            limit,
+            page: 1,
+          });
+          const response = await fetch(url, this.getAuthHeaders());
+
+          if (!response.ok) {
+            throw new Error(`Failed to fetch boards: ${response.statusText}`);
+          }
+
+          const data = (await parseResponseBody(response)) as {
+            boards?: Array<{
+              id: string;
+              name: string;
+              createdAt: string;
+            }>;
+          };
+
+          const boards = data?.boards || [];
+
+          if (boards.length === 0) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    {
+                      success: true,
+                      exportedCount: 0,
+                      message: "No boards found in folder",
+                    },
+                    null,
+                    2
+                  ),
+                },
+              ],
+            };
+          }
+
+          const exportedFiles: string[] = [];
+          let successCount = 0;
+          let errorCount = 0;
+
+          for (const board of boards) {
+            try {
+              const boardUrl = buildUrl(
+                DAGLO_API_BASE,
+                `/v2/boards/${board.id}`
+              );
+              const boardResponse = await fetch(
+                boardUrl,
+                this.getAuthHeaders()
+              );
+
+              if (!boardResponse.ok) {
+                logger.error(
+                  { boardId: board.id, status: boardResponse.status },
+                  "Failed to fetch board detail"
+                );
+                errorCount++;
+                continue;
+              }
+
+              const boardData = (await parseResponseBody(boardResponse)) as {
+                id: string;
+                name: string;
+                createdAt: string;
+                content?: string;
+                summary?: string;
+                keywords?: string[];
+                aiSummary?: string;
+              };
+
+              let content = boardData.content;
+              if (content) {
+                content = decodeZlibBase64Content(content);
+              }
+
+              const dateForFilename = formatDateForFilename(
+                boardData.createdAt
+              );
+              const sanitizedName = sanitizeFilename(boardData.name);
+              const baseFilename = `${dateForFilename} ${sanitizedName}`;
+
+              const tags = ["journal", "daglo"];
+              const frontmatter = generateFrontmatter({
+                title: boardData.name,
+                date: boardData.createdAt,
+                tags,
+                keywords: boardData.keywords || [],
+                boardId: boardData.id,
+                created: boardData.createdAt,
+              });
+
+              if (
+                (outputType === "original" || outputType === "both") &&
+                content
+              ) {
+                const originalDir = resolve(outputDir, "original");
+                mkdirSync(originalDir, { recursive: true });
+
+                const originalFilePath = resolve(
+                  originalDir,
+                  `${baseFilename}.md`
+                );
+                const formattedContent = formatOriginalContent(content);
+                const fullContent = `${frontmatter}\n\n${formattedContent}`;
+
+                writeFileSync(originalFilePath, fullContent, "utf-8");
+                exportedFiles.push(originalFilePath);
+              }
+
+              if (outputType === "summary" || outputType === "both") {
+                const summaryDir = resolve(outputDir, "summary");
+                mkdirSync(summaryDir, { recursive: true });
+
+                const summaryFilePath = resolve(
+                  summaryDir,
+                  `${baseFilename}.md`
+                );
+                const summaryContentBody = formatSummaryContent({
+                  title: boardData.name,
+                  originalFilename: `${baseFilename}.md`,
+                  summary: boardData.summary,
+                  aiSummary: boardData.aiSummary,
+                  keywords: boardData.keywords,
+                  segments: [],
+                });
+                const fullSummaryContent = `${frontmatter}\n\n${summaryContentBody}`;
+
+                writeFileSync(summaryFilePath, fullSummaryContent, "utf-8");
+                exportedFiles.push(summaryFilePath);
+              }
+
+              successCount++;
+            } catch (error) {
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
+              logger.error(
+                { boardId: board.id, error: errorMessage },
+                "Failed to export board"
+              );
+              errorCount++;
+            }
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    success: true,
+                    totalBoards: boards.length,
+                    exportedCount: successCount,
+                    errorCount,
+                    generatedFiles: exportedFiles,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          logger.error(
+            { error: errorMessage },
+            "Failed to batch export folder"
+          );
+          throw error;
+        }
       }
     );
   }

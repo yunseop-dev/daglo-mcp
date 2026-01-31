@@ -16,6 +16,7 @@ MCP (Model Context Protocol) server for Daglo AI platform - speech-to-text trans
 - **Notification Options** (Phase 2): Manage notification delivery channels and categories
 - **Summary Language Settings** (Phase 2): Configure transcription and summary language preferences
 - **Board Sharing** (Phase 2): Create shareable links and view shared board information
+- **Obsidian Export** (Phase 3): Export boards to Obsidian-compatible markdown with YAML frontmatter
 
 ## Installation
 
@@ -524,6 +525,57 @@ Retrieve information about a shared board (public access, no authentication requ
 - Bookmarks (if shareable)
 - Board content and segments
 
+#### `export-to-obsidian` (NEW - PHASE 3)
+Export a single board to Obsidian-compatible markdown with YAML frontmatter.
+
+**Parameters:**
+- `boardId` (string, required): Board ID to export
+- `fileMetaId` (string, optional): File metadata ID for additional data
+- `outputType` (enum, optional): "original", "summary", or "both" (default: "both")
+- `outputDir` (string, optional): Output directory (default: "./docs")
+- `includeContent` (boolean, optional): Include full transcription content (default: true)
+- `includeSummary` (boolean, optional): Include summary (default: true)
+- `includeKeywords` (boolean, optional): Include keywords (default: true)
+- `includeAiSummary` (boolean, optional): Include AI summary (default: true)
+
+**Example:**
+```json
+{
+  "boardId": "qpQ4grmCEgCpfxyZ",
+  "outputType": "both",
+  "outputDir": "./docs"
+}
+```
+
+**Output:**
+- Creates `{outputDir}/original/{YYYY-MM-DD} {board name}.md` with transcription
+- Creates `{outputDir}/summary/{YYYY-MM-DD} {board name}.md` with structured summary
+- Both files include YAML frontmatter (title, date, tags, keywords, source, board_id, created)
+- Summary includes Obsidian callouts, wikilinks to original, and inline tags
+
+#### `batch-export-folder` (NEW - PHASE 3)
+Export all boards in a folder to Obsidian markdown.
+
+**Parameters:**
+- `folderId` (string, required): Folder ID to export
+- `outputDir` (string, optional): Output directory (default: "./docs")
+- `outputType` (enum, optional): "original", "summary", or "both" (default: "both")
+- `limit` (number, optional): Max boards to export (default: 50)
+
+**Example:**
+```json
+{
+  "folderId": "folder123",
+  "outputDir": "./docs/diary",
+  "outputType": "both",
+  "limit": 10
+}
+```
+
+**Output:**
+- Exports all boards in the specified folder
+- Returns summary with count of exported files and file paths
+
 ## Test Coverage
 
 The project includes comprehensive tests for all MCP tools:
@@ -540,6 +592,7 @@ The project includes comprehensive tests for all MCP tools:
 - **Notification Options Tests** (Phase 2): Get and update notification preferences
 - **Summary Language Tests** (Phase 2): Get and update summary language settings
 - **Board Sharing Tests** (Phase 2): Create share links and retrieve shared board info
+- **Obsidian Export Tests** (Phase 3): Export boards to Obsidian markdown format
 - **URL Construction**: URL building and parameter handling
 - **Type Validation**: Board status and type validation
 - **Error Handling**: Various HTTP error scenarios
