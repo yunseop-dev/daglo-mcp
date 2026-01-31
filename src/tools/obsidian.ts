@@ -53,29 +53,38 @@ export const registerObsidianTools = (
         const outputDir = args.outputDir || "./docs";
         const outputType = args.outputType || "both";
 
-        const url = buildUrl(client.baseUrl, `/v2/boards/${args.boardId}`);
+        const url = buildUrl(client.baseUrl, `/boards/${args.boardId}`);
         const response = await fetch(url, { headers: client.getAuthHeaders() });
 
         if (!response.ok) {
           throw new Error(`Failed to fetch board: ${response.statusText}`);
         }
 
-        const boardData = (await parseResponseBody(response)) as {
+        const rawBoardData = (await parseResponseBody(response)) as {
           id: string;
           name: string;
-          createdAt: string;
+          createTime?: string;
+          createdAt?: string;
           content?: string;
           summary?: string;
           keywords?: string[];
           aiSummary?: string;
           fileMetaId?: string;
+          fileMeta?: Array<{ id: string }>;
         };
 
-        if (!boardData) {
+        if (!rawBoardData) {
           throw new Error("Failed to parse board data");
         }
 
-        const fileMetaId = args.fileMetaId || boardData.fileMetaId;
+        const boardData = {
+          ...rawBoardData,
+          createdAt: rawBoardData.createdAt || rawBoardData.createTime || new Date().toISOString(),
+        };
+
+        const fileMetaId = args.fileMetaId || 
+          rawBoardData.fileMetaId || 
+          rawBoardData.fileMeta?.[0]?.id;
         let content: string | undefined;
 
         if (fileMetaId) {
@@ -347,7 +356,7 @@ export const registerObsidianTools = (
 
         for (const board of boards) {
           try {
-            const boardUrl = buildUrl(client.baseUrl, `/v2/boards/${board.id}`);
+            const boardUrl = buildUrl(client.baseUrl, `/boards/${board.id}`);
             const boardResponse = await fetch(boardUrl, {
               headers: client.getAuthHeaders(),
             });
