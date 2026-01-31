@@ -3235,15 +3235,63 @@ class DagloMcpServer {
             summary?: string;
             keywords?: string[];
             aiSummary?: string;
+            fileMetaId?: string;
           };
 
           if (!boardData) {
             throw new Error("Failed to parse board data");
           }
 
-          let content = boardData.content;
-          if (content) {
-            content = decodeZlibBase64Content(content);
+          // Get fileMetaId from args or boardData
+          const fileMetaId = args.fileMetaId || boardData.fileMetaId;
+
+          // Fetch full script content via script API (not board content which is truncated)
+          let content: string | undefined;
+
+          if (fileMetaId) {
+            const scriptUrl = buildUrl(
+              DAGLO_API_BASE,
+              `/file-meta/${fileMetaId}/script`,
+              { includeContent: "true" }
+            );
+            const scriptResponse = await fetch(
+              scriptUrl,
+              this.getAuthHeaders()
+            );
+
+            if (scriptResponse.ok) {
+              const scriptData = (await parseResponseBody(scriptResponse)) as
+                | { content?: string; script?: string; text?: string; item?: string }
+                | string;
+
+              let rawContent: string | undefined;
+              if (typeof scriptData === "string") {
+                rawContent = scriptData;
+              } else {
+                rawContent =
+                  scriptData.content ??
+                  scriptData.script ??
+                  scriptData.text ??
+                  scriptData.item;
+              }
+
+              if (rawContent) {
+                // Decode and extract plain text from karaoke tokens
+                const normalizedContent = normalizeScriptContent(rawContent);
+                const tokens = extractKaraokeTokens(normalizedContent);
+                content = buildPlainTextFromTokens(tokens);
+
+                // Fallback to normalized content if token extraction fails
+                if (!content && normalizedContent) {
+                  content = normalizedContent;
+                }
+              }
+            }
+          }
+
+          // Fallback to board content if script API fails
+          if (!content && boardData.content) {
+            content = decodeZlibBase64Content(boardData.content);
           }
 
           let summary = boardData.summary;
@@ -3256,11 +3304,11 @@ class DagloMcpServer {
             speaker?: string;
           }> = [];
 
-          if (args.fileMetaId) {
+          if (fileMetaId) {
             if (args.includeSummary) {
               const summaryUrl = buildUrl(
                 DAGLO_API_BASE,
-                `/file-meta/${args.fileMetaId}/summary`
+                `/file-meta/${fileMetaId}/summary`
               );
               const summaryResponse = await fetch(
                 summaryUrl,
@@ -3277,7 +3325,7 @@ class DagloMcpServer {
             if (args.includeKeywords) {
               const keywordsUrl = buildUrl(
                 DAGLO_API_BASE,
-                `/file-meta/${args.fileMetaId}/keywords`
+                `/file-meta/${fileMetaId}/keywords`
               );
               const keywordsResponse = await fetch(
                 keywordsUrl,
@@ -3294,7 +3342,7 @@ class DagloMcpServer {
             if (args.includeAiSummary) {
               const aiSummaryUrl = buildUrl(
                 DAGLO_API_BASE,
-                `/file-meta/${args.fileMetaId}/long-summary`
+                `/file-meta/${fileMetaId}/long-summary`
               );
               const aiSummaryResponse = await fetch(
                 aiSummaryUrl,
@@ -3310,7 +3358,7 @@ class DagloMcpServer {
 
             const segmentsUrl = buildUrl(
               DAGLO_API_BASE,
-              `/file-meta/${args.fileMetaId}/segment-summary`
+              `/file-meta/${fileMetaId}/segment-summary`
             );
             const segmentsResponse = await fetch(
               segmentsUrl,
@@ -3511,11 +3559,53 @@ class DagloMcpServer {
                 summary?: string;
                 keywords?: string[];
                 aiSummary?: string;
+                fileMetaId?: string;
               };
 
-              let content = boardData.content;
-              if (content) {
-                content = decodeZlibBase64Content(content);
+              const fileMetaId = boardData.fileMetaId;
+              let content: string | undefined;
+
+              if (fileMetaId) {
+                const scriptUrl = buildUrl(
+                  DAGLO_API_BASE,
+                  `/file-meta/${fileMetaId}/script`,
+                  { includeContent: "true" }
+                );
+                const scriptResponse = await fetch(
+                  scriptUrl,
+                  this.getAuthHeaders()
+                );
+
+                if (scriptResponse.ok) {
+                  const scriptData = (await parseResponseBody(scriptResponse)) as
+                    | { content?: string; script?: string; text?: string; item?: string }
+                    | string;
+
+                  let rawContent: string | undefined;
+                  if (typeof scriptData === "string") {
+                    rawContent = scriptData;
+                  } else {
+                    rawContent =
+                      scriptData.content ??
+                      scriptData.script ??
+                      scriptData.text ??
+                      scriptData.item;
+                  }
+
+                  if (rawContent) {
+                    const normalizedContent = normalizeScriptContent(rawContent);
+                    const tokens = extractKaraokeTokens(normalizedContent);
+                    content = buildPlainTextFromTokens(tokens);
+
+                    if (!content && normalizedContent) {
+                      content = normalizedContent;
+                    }
+                  }
+                }
+              }
+
+              if (!content && boardData.content) {
+                content = decodeZlibBase64Content(boardData.content);
               }
 
               const dateForFilename = formatDateForFilename(
