@@ -309,6 +309,134 @@ describe('Daglo API Integration', () => {
     });
   });
 
+  describe('get-latest-board-content', () => {
+    it('should fetch latest board sorted by createTime desc', async () => {
+      const mockBoards = {
+        items: [
+          {
+            id: 'board-2',
+            name: '2026. 1. 31. 09:55 녹음',
+            createTime: '2026-01-31T00:55:02.459Z',
+            fileMetaId: 'file-2'
+          },
+          {
+            id: 'board-1',
+            name: '2026. 1. 25. 11:22 녹음',
+            createTime: '2026-01-25T02:22:57.660Z',
+            fileMetaId: 'file-1'
+          }
+        ]
+      };
+
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => mockBoards
+      });
+
+      const response = await fetch('https://backend.daglo.ai/v2/boards?page=1&limit=50&sort=createTime.desc');
+      const data = await response.json();
+
+      expect(data.items[0].id).toBe('board-2');
+      expect(data.items[0].createTime).toBe('2026-01-31T00:55:02.459Z');
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('sort=createTime.desc')
+      );
+    });
+
+    it('should use createTime.desc as default sort parameter', async () => {
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ items: [] })
+      });
+
+      await fetch('https://backend.daglo.ai/v2/boards?page=1&limit=50&sort=createTime.desc');
+      
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('sort=createTime.desc')
+      );
+    });
+
+    it('should correctly identify latest board from multiple boards', async () => {
+      const mockBoards = {
+        items: [
+          {
+            id: 'board-3',
+            createTime: '2026-01-31T12:00:00.000Z',
+            fileMetaId: 'file-3'
+          },
+          {
+            id: 'board-2',
+            createTime: '2026-01-31T00:55:02.459Z',
+            fileMetaId: 'file-2'
+          },
+          {
+            id: 'board-1',
+            createTime: '2026-01-25T02:22:57.660Z',
+            fileMetaId: 'file-1'
+          }
+        ]
+      };
+
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => mockBoards
+      });
+
+      const response = await fetch('https://backend.daglo.ai/v2/boards?page=1&limit=50&sort=createTime.desc');
+      const data = await response.json();
+
+      expect(data.items[0].id).toBe('board-3');
+      expect(data.items[0].createTime).toBe('2026-01-31T12:00:00.000Z');
+    });
+  });
+
+  describe('export-board-content', () => {
+    it('should fetch boards sorted by createTime desc when no boardId provided', async () => {
+      const mockBoards = {
+        items: [
+          {
+            id: 'board-2',
+            name: '2026. 1. 31. 09:55 녹음',
+            createTime: '2026-01-31T00:55:02.459Z',
+            fileMetaId: 'file-2'
+          },
+          {
+            id: 'board-1',
+            name: '2026. 1. 25. 11:22 녹음',
+            createTime: '2026-01-25T02:22:57.660Z',
+            fileMetaId: 'file-1'
+          }
+        ]
+      };
+
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => mockBoards
+      });
+
+      const response = await fetch('https://backend.daglo.ai/v2/boards?page=1&limit=50&sort=createTime.desc');
+      const data = await response.json();
+
+      expect(data.items[0].id).toBe('board-2');
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('sort=createTime.desc')
+      );
+    });
+
+    it('should use createTime.desc as default sort parameter', async () => {
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ items: [] })
+      });
+
+      await fetch('https://backend.daglo.ai/v2/boards?page=1&limit=50&sort=createTime.desc');
+      
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('sort=createTime.desc')
+      );
+    });
+  });
+
   describe('error handling', () => {
     it('should handle 401 Unauthorized', async () => {
       (global.fetch as any).mockResolvedValue({

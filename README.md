@@ -92,6 +92,21 @@ Retrieve detailed information including content, summary, keywords, AI summary, 
 }
 ```
 
+#### `update-board-name`
+Update a board name.
+
+**Parameters:**
+- `boardId` (string, required): Board ID to update
+- `name` (string, required): New board name
+
+**Example:**
+```json
+{
+  "boardId": "abc123",
+  "name": "2026. 1. 25. 11:22 녹음"
+}
+```
+
 #### `get-latest-board-content`
 Retrieve the content of the most recently created board. Optionally decodes zlib+base64 content.
 

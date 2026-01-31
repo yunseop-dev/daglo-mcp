@@ -685,6 +685,38 @@ class DagloMcpServer {
     );
 
     this.server.registerTool(
+      "update-board-name",
+      {
+        title: "Update Board Name",
+        description: "Update a board name",
+        inputSchema: {
+          boardId: z.string().describe("Board ID to update"),
+          name: z.string().min(1).describe("New board name"),
+        },
+      },
+      async (args) => {
+        const requestBody = { name: args.name };
+
+        const response = await fetch(`${DAGLO_API_BASE}/boards/${args.boardId}`,
+          {
+            method: "PATCH",
+            ...this.getAuthHeaders(),
+            body: JSON.stringify(requestBody),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Failed to update board name: ${response.statusText}`);
+        }
+
+        const data = await parseResponseBody(response);
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      }
+    );
+
+    this.server.registerTool(
       "get-board-detail",
       {
         title: "Get Board Detail",
@@ -986,6 +1018,7 @@ class DagloMcpServer {
         const limit = args.limit ?? 50;
         params.append("page", "1");
         params.append("limit", limit.toString());
+        params.append("sort", "createTime.desc");
 
         const listResponse = await fetch(
           `${DAGLO_API_BASE}/v2/boards?${params.toString()}`,
@@ -1137,6 +1170,7 @@ class DagloMcpServer {
           const limit = args.limit ?? 50;
           params.append("page", "1");
           params.append("limit", limit.toString());
+          params.append("sort", "createTime.desc");
 
           const listResponse = await fetch(
             `${DAGLO_API_BASE}/v2/boards?${params.toString()}`,
