@@ -24,40 +24,117 @@ const extractSegmentsFromScript = (script: Record<string, unknown>): ScriptSegme
   const paragraphs = editorState?.root?.children;
   if (!Array.isArray(paragraphs)) return segments;
 
+  const tokens: KaraokeToken[] = [];
   for (const paragraph of paragraphs) {
     const children = paragraph.children as Array<Record<string, unknown>> | undefined;
     if (!Array.isArray(children)) continue;
-
-    const tokens: KaraokeToken[] = [];
-    let minTime = Infinity;
-    let maxTime = -Infinity;
-    let text = "";
 
     for (const child of children) {
       if (child.type === "karaoke" && typeof child.text === "string") {
         const startTime = typeof child.s === "number" ? child.s : 0;
         const endTime = typeof child.e === "number" ? child.e : 0;
         tokens.push({ text: child.text, startTime, endTime });
-        text += child.text;
-        if (startTime < minTime) minTime = startTime;
-        if (endTime > maxTime) maxTime = endTime;
       }
-    }
-
-    if (tokens.length > 0 && minTime !== Infinity && maxTime !== -Infinity) {
-      segments.push({
-        text: text.trim(),
-        startTime: minTime,
-        endTime: maxTime,
-        tokens,
-      });
     }
   }
 
-  return segments;
+  const segmentsByPunctuation: ScriptSegment[] = [];
+  let currentTokens: KaraokeToken[] = [];
+  let currentText = "";
+  let startTime: number | null = null;
+  let endTime: number | null = null;
+
+  for (const token of tokens) {
+    if (startTime === null) {
+      startTime = token.startTime;
+    }
+    endTime = token.endTime;
+    currentTokens.push(token);
+    currentText += token.text;
+
+    if (/[?.!。！？]/.test(token.text)) {
+      if (startTime !== null && endTime !== null) {
+        segmentsByPunctuation.push({
+          text: currentText.trim(),
+          startTime,
+          endTime,
+          tokens: currentTokens,
+        });
+      }
+      currentTokens = [];
+      currentText = "";
+      startTime = null;
+      endTime = null;
+    }
+  }
+
+  if (currentText.trim().length > 0 && startTime !== null && endTime !== null) {
+    segmentsByPunctuation.push({
+      text: currentText.trim(),
+      startTime,
+      endTime,
+      tokens: currentTokens,
+    });
+  }
+
+  return segmentsByPunctuation;
 };
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const normalizeKeywords = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string") {
+      result.push(entry);
+    } else if (entry && typeof entry === "object" && "keyword" in entry) {
+      const keywordValue = (entry as { keyword?: unknown }).keyword;
+      if (typeof keywordValue === "string") {
+        result.push(keywordValue);
+      }
+    }
+  }
+  return result;
+};
+
+const extractYouTubeId = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.replace(/^www\./, "");
+    if (hostname === "youtu.be") {
+      return parsed.pathname.split("/").filter(Boolean)[0] ?? null;
+    }
+    if (hostname.endsWith("youtube.com")) {
+      const videoId = parsed.searchParams.get("v");
+      if (videoId) return videoId;
+      if (parsed.pathname.startsWith("/shorts/")) {
+        return parsed.pathname.split("/")[2] ?? null;
+      }
+      if (parsed.pathname.startsWith("/live/")) {
+        return parsed.pathname.split("/")[2] ?? null;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
+const applyTimeScale = (segments: ScriptSegment[], scale: number): ScriptSegment[] => {
+  if (scale === 1) return segments;
+  return segments.map((segment) => ({
+    ...segment,
+    startTime: segment.startTime * scale,
+    endTime: segment.endTime * scale,
+    tokens: segment.tokens.map((token) => ({
+      ...token,
+      startTime: token.startTime * scale,
+      endTime: token.endTime * scale,
+    })),
+  }));
+};
 
 const selectHighlightSegments = (
   segments: ScriptSegment[],
@@ -90,26 +167,52 @@ const selectHighlightSegments = (
 
   if (scoredSegments.length === 0 || scoredSegments[0].score === 0) {
     const midpoint = Math.floor(segments.length / 2);
-    const startIdx = Math.max(0, midpoint - 10);
-    const endIdx = Math.min(segments.length, midpoint + 10);
-    const selectedSegments = segments.slice(startIdx, endIdx);
-    let accumulatedDuration = 0;
-    const finalSegments: ScriptSegment[] = [];
-    for (const seg of selectedSegments) {
-      const segDuration = seg.endTime - seg.startTime;
-      if (accumulatedDuration + segDuration > targetDurationSeconds) break;
-      finalSegments.push(seg);
-      accumulatedDuration += segDuration;
+    const fallbackMatch = { segment: segments[midpoint], index: midpoint };
+    const { segment, index: centerIndex } = fallbackMatch;
+    let selectedSegments: ScriptSegment[] = [segment];
+    let totalDuration = segment.endTime - segment.startTime;
+
+    let leftIndex = centerIndex - 1;
+    let rightIndex = centerIndex + 1;
+
+    while (
+      totalDuration < targetDurationSeconds &&
+      (leftIndex >= 0 || rightIndex < segments.length)
+    ) {
+      let addedLeft = false;
+      let addedRight = false;
+
+      if (leftIndex >= 0) {
+        const leftSeg = segments[leftIndex];
+        const leftDuration = leftSeg.endTime - leftSeg.startTime;
+        if (totalDuration + leftDuration <= targetDurationSeconds) {
+          selectedSegments.unshift(leftSeg);
+          totalDuration += leftDuration;
+          leftIndex -= 1;
+          addedLeft = true;
+        }
+      }
+
+      if (rightIndex < segments.length && totalDuration < targetDurationSeconds) {
+        const rightSeg = segments[rightIndex];
+        const rightDuration = rightSeg.endTime - rightSeg.startTime;
+        if (totalDuration + rightDuration <= targetDurationSeconds) {
+          selectedSegments.push(rightSeg);
+          totalDuration += rightDuration;
+          rightIndex += 1;
+          addedRight = true;
+        }
+      }
+
+      if (!addedLeft && !addedRight) break;
     }
-    if (finalSegments.length === 0 && selectedSegments.length > 0) {
-      finalSegments.push(selectedSegments[0]);
-    }
-    const startTime = finalSegments.length > 0 ? finalSegments[0].startTime : 0;
+
+    const startTime = selectedSegments.length > 0 ? selectedSegments[0].startTime : 0;
     const endTime =
-      finalSegments.length > 0
-        ? finalSegments[finalSegments.length - 1].endTime
+      selectedSegments.length > 0
+        ? selectedSegments[selectedSegments.length - 1].endTime
         : startTime;
-    return { segments: finalSegments, startTime, endTime };
+    return { segments: selectedSegments, startTime, endTime };
   }
 
   const bestMatch = scoredSegments[0];
@@ -168,17 +271,163 @@ const formatTimestamp = (seconds: number): string => {
   return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")},${ms.toString().padStart(3, "0")}`;
 };
 
-const generateSrt = (segments: ScriptSegment[], clipStartTime: number): string => {
+const splitLongWord = (word: string, maxLength: number): string[] => {
+  const parts: string[] = [];
+  let remaining = word;
+  while (remaining.length > maxLength) {
+    parts.push(remaining.slice(0, maxLength));
+    remaining = remaining.slice(maxLength);
+  }
+  if (remaining.length > 0) {
+    parts.push(remaining);
+  }
+  return parts;
+};
+
+const wrapSubtitleText = (text: string, maxLineLength: number): string => {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+
+  if (!/\s/.test(normalized)) {
+    return splitLongWord(normalized, maxLineLength).join("\n");
+  }
+
+  const words = normalized.split(" ");
+  const lines: string[] = [];
+  let currentLine = "";
+
+  const flushLine = () => {
+    if (currentLine) {
+      lines.push(currentLine);
+      currentLine = "";
+    }
+  };
+
+  for (const word of words) {
+    if (!currentLine) {
+      if (word.length > maxLineLength) {
+        lines.push(...splitLongWord(word, maxLineLength));
+        continue;
+      }
+      currentLine = word;
+      continue;
+    }
+
+    if (currentLine.length + 1 + word.length <= maxLineLength) {
+      currentLine = `${currentLine} ${word}`;
+      continue;
+    }
+
+    flushLine();
+    if (word.length > maxLineLength) {
+      lines.push(...splitLongWord(word, maxLineLength));
+      continue;
+    }
+    currentLine = word;
+  }
+
+  flushLine();
+  return lines.join("\n");
+};
+
+const splitTokenByMaxChars = (token: KaraokeToken, maxChars: number): KaraokeToken[] => {
+  if (token.text.length <= maxChars) return [token];
+  const totalChars = token.text.length;
+  const duration = token.endTime - token.startTime;
+  const perChar = totalChars > 0 ? duration / totalChars : 0;
+  const parts: KaraokeToken[] = [];
+
+  let offset = 0;
+  while (offset < totalChars) {
+    const chunk = token.text.slice(offset, offset + maxChars);
+    const chunkStart = token.startTime + perChar * offset;
+    const chunkEnd = token.startTime + perChar * (offset + chunk.length);
+    parts.push({ text: chunk, startTime: chunkStart, endTime: chunkEnd });
+    offset += chunk.length;
+  }
+
+  return parts;
+};
+
+const splitSegmentsByMaxChars = (
+  segments: ScriptSegment[],
+  maxChars: number
+): ScriptSegment[] => {
+  if (maxChars <= 0) return segments;
+  const results: ScriptSegment[] = [];
+
+  for (const segment of segments) {
+    if (segment.text.length <= maxChars) {
+      results.push(segment);
+      continue;
+    }
+
+    const tokens = segment.tokens.length
+      ? segment.tokens
+      : [{ text: segment.text, startTime: segment.startTime, endTime: segment.endTime }];
+
+    let currentTokens: KaraokeToken[] = [];
+    let currentText = "";
+    let startTime: number | null = null;
+    let endTime: number | null = null;
+
+    const flush = () => {
+      if (!currentText.trim() || startTime === null || endTime === null) return;
+      results.push({
+        text: currentText.trim(),
+        startTime,
+        endTime,
+        tokens: currentTokens,
+      });
+      currentTokens = [];
+      currentText = "";
+      startTime = null;
+      endTime = null;
+    };
+
+    for (const token of tokens) {
+      const parts = splitTokenByMaxChars(token, maxChars);
+      for (const part of parts) {
+        if (!currentText) {
+          startTime = part.startTime;
+        }
+        if (currentText.length + part.text.length > maxChars && currentText) {
+          flush();
+          startTime = part.startTime;
+        }
+        currentText += part.text;
+        endTime = part.endTime;
+        currentTokens.push(part);
+        if (currentText.length >= maxChars) {
+          flush();
+        }
+      }
+    }
+
+    flush();
+  }
+
+  return results;
+};
+
+const generateSrt = (
+  segments: ScriptSegment[],
+  clipStartTime: number,
+  maxSegmentChars: number
+): string => {
   let srtContent = "";
   let subtitleIndex = 1;
 
-  for (const segment of segments) {
+  const constrainedSegments = splitSegmentsByMaxChars(segments, maxSegmentChars);
+
+  for (const segment of constrainedSegments) {
     const adjustedStart = Math.max(0, segment.startTime - clipStartTime);
     const adjustedEnd = Math.max(0, segment.endTime - clipStartTime);
+    if (adjustedEnd <= adjustedStart) continue;
 
     srtContent += `${subtitleIndex}\n`;
     srtContent += `${formatTimestamp(adjustedStart)} --> ${formatTimestamp(adjustedEnd)}\n`;
-    srtContent += `${segment.text}\n\n`;
+    srtContent += `${wrapSubtitleText(segment.text, maxSegmentChars)}\n\n`;
     subtitleIndex += 1;
   }
 
@@ -202,11 +451,19 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
         outputDir: z
           .string()
           .optional()
-          .describe("Output directory for generated files (default: ./output)"),
+          .describe("Output directory for generated files (default: ./docs/clips)"),
         clipLengthMinutes: z
           .number()
           .optional()
           .describe("Target clip length in minutes (default: 3.5)"),
+        subtitleMaxLineLength: z
+          .number()
+          .optional()
+          .describe("Max characters per subtitle segment (default: 42)"),
+        shortsMode: z
+          .boolean()
+          .optional()
+          .describe("Generate vertical 9:16 clip for shorts (default: false)"),
         highlightKeywords: z
           .array(z.string())
           .optional()
@@ -221,6 +478,8 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
 
         const outputDir = args.outputDir || "./docs/clips";
         const clipLengthMinutes = args.clipLengthMinutes ?? 3.5;
+        const subtitleMaxLineLength = args.subtitleMaxLineLength ?? 42;
+        const shortsMode = args.shortsMode ?? false;
 
         mkdirSync(outputDir, { recursive: true });
 
@@ -244,7 +503,7 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
             boardData.fileMetaId ||
             (Array.isArray(boardData.fileMeta) ? boardData.fileMeta[0]?.id : undefined);
           if (!keywords.length && boardData.keywords) {
-            keywords = boardData.keywords;
+            keywords = normalizeKeywords(boardData.keywords);
           }
         }
 
@@ -264,7 +523,7 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
             const keywordsData = (await parseResponseBody(keywordsResponse)) as {
               keywords?: string[];
             };
-            keywords = keywordsData?.keywords || [];
+            keywords = normalizeKeywords(keywordsData?.keywords);
           }
         }
 
@@ -317,8 +576,42 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
           throw new Error("No segments found in script.");
         }
 
+        const videoId = extractYouTubeId(args.youtubeUrl);
+        const videoFilename = videoId ? `video_${videoId}.mp4` : "video_full.mp4";
+        const videoPath = resolve(outputDir, videoFilename);
+        if (existsSync(videoPath)) {
+          logger.info({ path: videoPath }, "Video already exists, skipping download");
+        } else {
+          logger.info({ url: args.youtubeUrl, path: videoPath }, "Downloading video");
+          execSync(
+            `python -m yt_dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "${videoPath}" "${args.youtubeUrl}"`,
+            { stdio: "inherit" }
+          );
+        }
+
+        if (!existsSync(videoPath)) {
+          throw new Error(`Video download failed: ${videoPath} does not exist`);
+        }
+
+        const durationOutput = execSync(
+          `ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "${videoPath}"`
+        )
+          .toString()
+          .trim();
+        const videoDuration = Number.parseFloat(durationOutput);
+        const maxSegmentEnd = segments.reduce(
+          (max, segment) => Math.max(max, segment.endTime),
+          0
+        );
+        const scaleNeeded =
+          Number.isFinite(videoDuration) &&
+          maxSegmentEnd > Math.max(videoDuration * 10, 10000)
+            ? 0.001
+            : 1;
+        const scaledSegmentsAll = applyTimeScale(segments, scaleNeeded);
+
         const { segments: selectedSegments, startTime, endTime } = selectHighlightSegments(
-          segments,
+          scaledSegmentsAll,
           clipLengthMinutes,
           keywords
         );
@@ -326,27 +619,18 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
           throw new Error("No highlight segments selected.");
         }
 
-        const videoFilename = "video_full.mp4";
-        const videoPath = resolve(outputDir, videoFilename);
-        logger.info({ url: args.youtubeUrl, path: videoPath }, "Downloading video");
-        execSync(
-          `python -m yt_dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "${videoPath}" "${args.youtubeUrl}"`,
-          { stdio: "inherit" }
-        );
+        const scaledStartTime = startTime;
+        const scaledEndTime = endTime;
 
-        if (!existsSync(videoPath)) {
-          throw new Error(`Video download failed: ${videoPath} does not exist`);
-        }
-
-        const clipDuration = endTime - startTime;
+        const clipDuration = scaledEndTime - scaledStartTime;
         const clipFilename = "clip_no_subs.mp4";
         const clipPath = resolve(outputDir, clipFilename);
         logger.info(
-          { start: startTime, end: endTime, duration: clipDuration },
+          { start: scaledStartTime, end: scaledEndTime, duration: clipDuration },
           "Cutting clip"
         );
         execSync(
-          `ffmpeg -y -ss ${startTime} -i "${videoPath}" -t ${clipDuration} -c copy "${clipPath}"`,
+          `ffmpeg -y -ss ${scaledStartTime} -i "${videoPath}" -t ${clipDuration} -c copy "${clipPath}"`,
           { stdio: "inherit" }
         );
 
@@ -354,7 +638,11 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
           throw new Error(`Clip generation failed: ${clipPath} does not exist`);
         }
 
-        const srtContent = generateSrt(selectedSegments, startTime);
+        const srtContent = generateSrt(
+          selectedSegments,
+          scaledStartTime,
+          subtitleMaxLineLength
+        );
         const srtFilename = "subtitles.srt";
         const srtPath = resolve(outputDir, srtFilename);
         writeFileSync(srtPath, srtContent, "utf-8");
@@ -368,8 +656,13 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
           .replace(/:/g, "\\:")
           .replace(/'/g, "\\'");
         const subtitlesFilter = `subtitles='${normalizedSrtPath}'`;
+        const shortsFilter =
+          "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920";
+        const videoFilter = shortsMode
+          ? `${shortsFilter},${subtitlesFilter}`
+          : subtitlesFilter;
         execSync(
-          `ffmpeg -y -i "${clipPath}" -vf "${subtitlesFilter}" -c:a copy "${finalPath}"`,
+          `ffmpeg -y -i "${clipPath}" -vf "${videoFilter}" -c:a copy "${finalPath}"`,
           { stdio: "inherit" }
         );
 
@@ -389,11 +682,14 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
                   clipPath,
                   srtPath,
                   finalPath,
-                  clipStartTime: startTime,
-                  clipEndTime: endTime,
+                  clipStartTime: scaledStartTime,
+                  clipEndTime: scaledEndTime,
                   clipDuration,
                   segmentCount: selectedSegments.length,
                   keywords,
+                  timeScale: scaleNeeded,
+                  shortsMode,
+                  subtitleMaxLineLength,
                 },
                 null,
                 2

@@ -229,6 +229,8 @@ Download a YouTube video, select a highlight segment based on board transcript k
 - `fileMetaId` (string, optional): File metadata ID (takes precedence over boardId)
 - `outputDir` (string, optional): Output directory (default: "./docs/clips")
 - `clipLengthMinutes` (number, optional): Target clip length in minutes (default: 3.5)
+- `subtitleMaxLineLength` (number, optional): Max characters per subtitle segment (default: 42)
+- `shortsMode` (boolean, optional): Generate vertical 9:16 clip for shorts (default: false)
 - `highlightKeywords` (string[], optional): Override keywords for highlight selection
 
 **Example:**
@@ -237,12 +239,13 @@ Download a YouTube video, select a highlight segment based on board transcript k
   "youtubeUrl": "https://youtu.be/vMmEF5OYZds",
   "boardId": "KXl_F8J7oTS1FURF",
   "outputDir": "./docs/clips",
-  "clipLengthMinutes": 3.5
+  "clipLengthMinutes": 3.5,
+  "shortsMode": true
 }
 ```
 
 **Output:**
-- `{outputDir}/video_full.mp4` (downloaded source video)
+- `{outputDir}/video_<youtubeId>.mp4` (downloaded source video, cached by YouTube ID)
 - `{outputDir}/clip_no_subs.mp4` (highlight clip without subtitles)
 - `{outputDir}/subtitles.srt` (generated subtitles)
 - `{outputDir}/clip_with_subs.mp4` (final clip with burned-in subtitles)
