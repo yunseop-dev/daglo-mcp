@@ -31,6 +31,10 @@ npm run build
 npm start
 ```
 
+### Skills Guide
+
+- See `SKILLS.md` for a practical skills-oriented guide (tool map, usage flows, and ops notes).
+
 ### Available Tools
 
 #### `login`
@@ -249,6 +253,30 @@ Download a YouTube video, select a highlight segment based on board transcript k
 - `{outputDir}/clip_no_subs.mp4` (highlight clip without subtitles)
 - `{outputDir}/subtitles.srt` (generated subtitles)
 - `{outputDir}/clip_with_subs.mp4` (final clip with burned-in subtitles)
+
+#### `create-youtube-full-subtitled-video`
+Download a YouTube video, build subtitles from the board transcript JSON, and burn them into the full video.
+
+**Parameters:**
+- `youtubeUrl` (string, required): YouTube video URL to download
+- `boardId` (string, optional): Board ID to fetch transcript from
+- `fileMetaId` (string, optional): File metadata ID (takes precedence over boardId)
+- `outputDir` (string, optional): Output directory (default: "./docs/full-subtitles")
+- `subtitleMaxLineLength` (number, optional): Max characters per subtitle segment (default: 42)
+
+**Example:**
+```json
+{
+  "youtubeUrl": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "boardId": "KXl_F8J7oTS1FURF",
+  "outputDir": "./docs/full-subtitles"
+}
+```
+
+**Output:**
+- `{outputDir}/video_<youtubeId>.mp4` (downloaded source video, cached by YouTube ID)
+- `{outputDir}/subtitles.srt` (generated subtitles)
+- `{outputDir}/video_with_subs.mp4` (final full video with burned-in subtitles)
 
 ## API Endpoints
 

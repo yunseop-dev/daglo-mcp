@@ -704,4 +704,188 @@ export const registerVideoTools = (server: McpServer, client: DagloApiClient) =>
       }
     }
   );
+
+  server.registerTool(
+    "create-youtube-full-subtitled-video",
+    {
+      title: "Create YouTube Full Subtitled Video",
+      description:
+        "Download a YouTube video with yt-dlp, build subtitles from board transcript JSON, and burn them into the full video via ffmpeg.",
+      inputSchema: {
+        youtubeUrl: z.string().describe("YouTube video URL to download"),
+        boardId: z.string().optional().describe("Board ID to fetch transcript from"),
+        fileMetaId: z
+          .string()
+          .optional()
+          .describe("File metadata ID to fetch script from (takes precedence over boardId)"),
+        outputDir: z
+          .string()
+          .optional()
+          .describe("Output directory for generated files (default: ./docs/full-subtitles)"),
+        subtitleMaxLineLength: z
+          .number()
+          .optional()
+          .describe("Max characters per subtitle segment (default: 42)"),
+      },
+    },
+    async (args) => {
+      try {
+        if (!args.boardId && !args.fileMetaId) {
+          throw new Error("Provide boardId or fileMetaId to fetch transcript.");
+        }
+
+        const outputDir = args.outputDir || "./docs/full-subtitles";
+        const subtitleMaxLineLength = args.subtitleMaxLineLength ?? 42;
+
+        mkdirSync(outputDir, { recursive: true });
+
+        let fileMetaId = args.fileMetaId;
+
+        if (!fileMetaId && args.boardId) {
+          const boardUrl = buildUrl(client.baseUrl, `/boards/${args.boardId}`);
+          const boardResponse = await fetch(boardUrl, {
+            headers: client.getAuthHeaders(),
+          });
+          if (!boardResponse.ok) {
+            throw new Error(`Failed to fetch board: ${boardResponse.statusText}`);
+          }
+          const boardData = (await parseResponseBody(boardResponse)) as {
+            fileMetaId?: string;
+            fileMeta?: Array<{ id?: string }>;
+          };
+          fileMetaId =
+            boardData.fileMetaId ||
+            (Array.isArray(boardData.fileMeta) ? boardData.fileMeta[0]?.id : undefined);
+        }
+
+        if (!fileMetaId) {
+          throw new Error("Could not determine fileMetaId from boardId.");
+        }
+
+        const scripts: Record<string, unknown>[] = [];
+        const scriptUrl = buildUrl(client.baseUrl, `/file-meta/${fileMetaId}/script`, {
+          limit: 60,
+          page: 0,
+        });
+        const scriptResponse = await fetch(scriptUrl, {
+          headers: client.getAuthHeaders(),
+        });
+        if (!scriptResponse.ok) {
+          throw new Error(`Failed to fetch script: ${scriptResponse.statusText}`);
+        }
+
+        const scriptPayload = (await parseResponseBody(scriptResponse)) as {
+          item?: string;
+          meta?: { totalPages?: number };
+        };
+        const firstScript = decodeScriptItem(scriptPayload?.item);
+        if (firstScript) {
+          scripts.push(firstScript);
+        }
+
+        const totalPages = scriptPayload?.meta?.totalPages ?? 1;
+        for (let page = 1; page < totalPages; page += 1) {
+          const pageUrl = buildUrl(client.baseUrl, `/file-meta/${fileMetaId}/script`, {
+            limit: 60,
+            page,
+          });
+          const pageResponse = await fetch(pageUrl, {
+            headers: client.getAuthHeaders(),
+          });
+          if (!pageResponse.ok) {
+            throw new Error(`Failed to fetch script page ${page}: ${pageResponse.statusText}`);
+          }
+          const pagePayload = (await parseResponseBody(pageResponse)) as { item?: string };
+          const pageScript = decodeScriptItem(pagePayload?.item);
+          if (pageScript) {
+            scripts.push(pageScript);
+          }
+        }
+
+        const segments = scripts.flatMap((script) => extractSegmentsFromScript(script));
+        if (segments.length === 0) {
+          throw new Error("No segments found in script.");
+        }
+
+        const videoId = extractYouTubeId(args.youtubeUrl);
+        const videoFilename = videoId ? `video_${videoId}.mp4` : "video_full.mp4";
+        const videoPath = resolve(outputDir, videoFilename);
+        if (existsSync(videoPath)) {
+          logger.info({ path: videoPath }, "Video already exists, skipping download");
+        } else {
+          logger.info({ url: args.youtubeUrl, path: videoPath }, "Downloading video");
+          execSync(
+            `python -m yt_dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "${videoPath}" "${args.youtubeUrl}"`,
+            { stdio: "inherit" }
+          );
+        }
+
+        if (!existsSync(videoPath)) {
+          throw new Error(`Video download failed: ${videoPath} does not exist`);
+        }
+
+        const durationOutput = execSync(
+          `ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "${videoPath}"`
+        )
+          .toString()
+          .trim();
+        const videoDuration = Number.parseFloat(durationOutput);
+        const maxSegmentEnd = segments.reduce(
+          (max, segment) => Math.max(max, segment.endTime),
+          0
+        );
+        const scaleNeeded =
+          Number.isFinite(videoDuration) &&
+          maxSegmentEnd > Math.max(videoDuration * 10, 10000)
+            ? 0.001
+            : 1;
+        const scaledSegmentsAll = applyTimeScale(segments, scaleNeeded);
+
+        const srtContent = generateSrt(scaledSegmentsAll, 0, subtitleMaxLineLength);
+        const srtFilename = "subtitles.srt";
+        const srtPath = resolve(outputDir, srtFilename);
+        writeFileSync(srtPath, srtContent, "utf-8");
+        logger.info({ path: srtPath, segments: scaledSegmentsAll.length }, "Generated SRT");
+
+        const finalFilename = "video_with_subs.mp4";
+        const finalPath = resolve(outputDir, finalFilename);
+        logger.info({ path: finalPath }, "Burning subtitles into full video");
+        const normalizedSrtPath = srtPath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+        execSync(
+          `ffmpeg -y -i "${videoPath}" -vf "subtitles='${normalizedSrtPath}'" -c:a copy "${finalPath}"`,
+          { stdio: "inherit" }
+        );
+
+        if (!existsSync(finalPath)) {
+          throw new Error(`Final video generation failed: ${finalPath} does not exist`);
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  success: true,
+                  outputDir,
+                  videoPath,
+                  srtPath,
+                  finalPath,
+                  segmentCount: scaledSegmentsAll.length,
+                  timeScale: scaleNeeded,
+                  subtitleMaxLineLength,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Failed to create full subtitled video");
+        throw error;
+      }
+    }
+  );
 };
