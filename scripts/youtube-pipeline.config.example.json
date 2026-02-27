@@ -1,0 +1,21 @@
+{
+  "workDir": "./.work/youtube-pipeline",
+  "nasOutputDir": "/Volumes/iptime-nas/daglo-youtube",
+  "maxNewPerRun": 3,
+  "ytdlpPath": "yt-dlp",
+  "ffmpegPath": "ffmpeg",
+  "daglo": {
+    "language": "ko-KR",
+    "topic": "IT",
+    "useSpeakerDiarization": true,
+    "useDictionary": false,
+    "pollIntervalSec": 60,
+    "pollTimeoutMin": 30
+  },
+  "channels": [
+    {
+      "name": "Example Channel",
+      "rssUrl": "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw"
+    }
+  ]
+}
