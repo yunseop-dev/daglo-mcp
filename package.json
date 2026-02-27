@@ -10,6 +10,7 @@
     "dev": "tsc && node dist/index.js",
     "pipeline:youtube": "node scripts/youtube-auto-pipeline.mjs scripts/youtube-pipeline.config.json",
     "pipeline:youtube:install-launchd": "bash scripts/install-youtube-pipeline-launchd.sh",
+    "pipeline:youtube:preflight": "node scripts/nas-preflight-check.mjs scripts/youtube-pipeline.config.json",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
