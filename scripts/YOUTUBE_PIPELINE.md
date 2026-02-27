@@ -38,6 +38,16 @@ npm run pipeline:youtube:preflight
 
 ## 2) 설정 파일
 
+빠른 생성 (채널 URL/ID -> RSS 자동 변환):
+
+```bash
+npm run pipeline:youtube:bootstrap -- \
+  --nas /Volumes/iptime-nas/daglo-youtube \
+  https://www.youtube.com/@GoogleDevelopers
+```
+
+수동 생성:
+
 ```bash
 cp scripts/youtube-pipeline.config.example.json scripts/youtube-pipeline.config.json
 ```
@@ -47,6 +57,13 @@ cp scripts/youtube-pipeline.config.example.json scripts/youtube-pipeline.config.
 - `nasOutputDir`: NAS 마운트 경로
 - `channels`: 구독 채널 RSS URL 목록
 - `maxNewPerRun`: 1회 실행당 최대 처리 개수
+
+지원하는 채널 입력 형식(`bootstrap`):
+
+- `UC...` channel ID
+- `https://www.youtube.com/channel/UC...`
+- `https://www.youtube.com/@handle`
+- 이미 완성된 RSS URL
 
 iptime NAS 예시 경로:
 
