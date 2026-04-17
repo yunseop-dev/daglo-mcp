@@ -56,4 +56,38 @@ export class DagloApiClient {
   get baseUrl(): string {
     return DAGLO_API_BASE;
   }
+
+  async request(path: string, init: RequestInit = {}): Promise<Response> {
+    const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
+    const merged: RequestInit = {
+      ...init,
+      headers: {
+        ...this.getAuthHeaders(),
+        ...(init.headers as Record<string, string> | undefined),
+      },
+    };
+
+    const response = await fetch(url, merged);
+    if (response.status !== 401) return response;
+
+    // Try re-login via env vars.
+    const email = process.env.DAGLO_EMAIL;
+    const password = process.env.DAGLO_PASSWORD;
+    if (!email || !password) {
+      throw new Error(
+        "Not authenticated. Run 'daglo auth login' or set DAGLO_EMAIL and DAGLO_PASSWORD."
+      );
+    }
+
+    // Lazy import to avoid circular module load at startup.
+    const { loginUser } = await import("../handlers/auth.js");
+    await loginUser(this, { email, password });
+
+    // Retry once with the new token.
+    const retryHeaders: HeadersInit = {
+      ...this.getAuthHeaders(),
+      ...(init.headers as Record<string, string> | undefined),
+    };
+    return await fetch(url, { ...init, headers: retryHeaders });
+  }
 }
