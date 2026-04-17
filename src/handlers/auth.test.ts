@@ -1,12 +1,24 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DagloApiClient } from "../api/client.js";
 import { loginUser } from "./auth.js";
 
 global.fetch = vi.fn() as any;
 
+let tmpHome: string;
+
 describe("loginUser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    tmpHome = mkdtempSync(join(tmpdir(), "daglo-auth-test-"));
+    process.env.XDG_CONFIG_HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    delete process.env.XDG_CONFIG_HOME;
+    rmSync(tmpHome, { recursive: true, force: true });
   });
 
   it("posts credentials and stores tokens on success", async () => {
