@@ -1,16 +1,16 @@
 {
   "name": "daglo-mcp",
   "version": "1.0.0",
-  "description": "MCP server for Daglo AI platform",
+  "description": "CLI for Daglo AI platform — speech-to-text and document management",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/cli.js",
   "bin": {
     "daglo": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc && chmod +x dist/cli.js",
-    "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js",
+    "start": "node dist/cli.js",
+    "dev": "tsc && chmod +x dist/cli.js && node dist/cli.js",
     "pipeline:youtube": "node scripts/youtube-auto-pipeline.mjs scripts/youtube-pipeline.config.json",
     "pipeline:youtube:bootstrap": "node scripts/bootstrap-youtube-pipeline-config.mjs",
     "pipeline:youtube:install-launchd": "bash scripts/install-youtube-pipeline-launchd.sh",
@@ -23,8 +23,8 @@
     "test:board-detail": "node scripts/test-board-detail.js"
   },
   "keywords": [
-    "mcp",
     "daglo",
+    "cli",
     "ai",
     "speech-to-text"
   ],
