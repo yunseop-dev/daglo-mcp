@@ -52,12 +52,12 @@ export const registerVideoCommand = (
       })) as Record<string, unknown>;
 
       if (opts.json) return writeJson(data);
-      const files =
-        Array.isArray(data.generatedFiles)
-          ? (data.generatedFiles as string[])
-          : Array.isArray(data.files)
-            ? (data.files as string[])
-            : [];
+      const files = [
+        data.videoPath,
+        data.clipPath,
+        data.srtPath,
+        data.finalPath,
+      ].filter((p): p is string => typeof p === "string");
       writeFilesWritten(files);
     });
 
@@ -84,12 +84,11 @@ export const registerVideoCommand = (
       })) as Record<string, unknown>;
 
       if (opts.json) return writeJson(data);
-      const files =
-        Array.isArray(data.generatedFiles)
-          ? (data.generatedFiles as string[])
-          : Array.isArray(data.files)
-            ? (data.files as string[])
-            : [];
+      const files = [
+        data.videoPath,
+        data.srtPath,
+        data.finalPath,
+      ].filter((p): p is string => typeof p === "string");
       writeFilesWritten(files);
     });
 };

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import chalk from "chalk";
 import { Command } from "commander";
 import { DagloApiClient } from "./api/client.js";
 import { registerAuthCommand } from "./cli/auth.js";
@@ -24,6 +25,7 @@ program
     const opts = thisCommand.opts();
     if (opts.verbose) (logger as unknown as { level: string }).level = "debug";
     if (opts.quiet) (logger as unknown as { level: string }).level = "warn";
+    if (opts.color === false) chalk.level = 0;
   });
 
 registerAuthCommand(program, client);
