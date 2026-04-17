@@ -7,6 +7,7 @@ import {
   getLoginPayload,
   getRefreshTokenFromResponse,
 } from "../utils/auth.js";
+import { deleteCredentials, loadCredentials } from "../auth/credentials.js";
 
 export const loginUser = async (
   client: DagloApiClient,
@@ -42,4 +43,24 @@ export const loginUser = async (
 
   client.setTokens(accessToken, refreshToken ?? undefined, payload.email);
   return data;
+};
+
+export interface AuthStatus {
+  loggedIn: boolean;
+  email?: string;
+  expiresAt?: string;
+}
+
+export const getAuthStatus = (): AuthStatus => {
+  const creds = loadCredentials();
+  if (!creds) return { loggedIn: false };
+  return {
+    loggedIn: true,
+    email: creds.email,
+    expiresAt: creds.expiresAt,
+  };
+};
+
+export const logoutUser = (): void => {
+  deleteCredentials();
 };
