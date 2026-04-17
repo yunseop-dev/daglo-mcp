@@ -40,6 +40,6 @@ export const loginUser = async (
     throw new Error("Login failed: access token not found in response.");
   }
 
-  client.setTokens(accessToken, refreshToken ?? undefined);
+  client.setTokens(accessToken, refreshToken ?? undefined, payload.email);
   return data;
 };
