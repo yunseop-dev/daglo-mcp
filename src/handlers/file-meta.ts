@@ -9,10 +9,7 @@ export const getFileMeta = async (
   client: DagloApiClient,
   args: GetFileMetaArgs
 ): Promise<unknown> => {
-  const response = await fetch(
-    `${client.baseUrl}/file-meta/${args.fileMetaId}`,
-    { headers: client.getAuthHeaders() }
-  );
+  const response = await client.request(`/file-meta/${args.fileMetaId}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch file meta: ${response.statusText}`);
   }
@@ -34,7 +31,7 @@ export const getKeywords = async (
     ? { headers: { "daglo-platform": "web" } }
     : { headers: client.getAuthHeaders() };
 
-  const response = await fetch(`${client.baseUrl}${path}`, init);
+  const response = await client.request(path, init);
   if (!response.ok) {
     throw new Error(`Failed to fetch keywords: ${response.statusText}`);
   }

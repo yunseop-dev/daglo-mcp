@@ -32,7 +32,7 @@ export const exportToObsidian = async (
     const outputType = args.outputType || "both";
 
     const url = buildUrl(client.baseUrl, `/boards/${args.boardId}`);
-    const response = await fetch(url, { headers: client.getAuthHeaders() });
+    const response = await client.request(url);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch board: ${response.statusText}`);
@@ -71,9 +71,7 @@ export const exportToObsidian = async (
         `/file-meta/${fileMetaId}/script`,
         { includeContent: "true" }
       );
-      const scriptResponse = await fetch(scriptUrl, {
-        headers: client.getAuthHeaders(),
-      });
+      const scriptResponse = await client.request(scriptUrl);
 
       if (scriptResponse.ok) {
         const scriptData = (await parseResponseBody(scriptResponse)) as
@@ -123,9 +121,7 @@ export const exportToObsidian = async (
           client.baseUrl,
           `/file-meta/${fileMetaId}/summary`
         );
-        const summaryResponse = await fetch(summaryUrl, {
-          headers: client.getAuthHeaders(),
-        });
+        const summaryResponse = await client.request(summaryUrl);
         if (summaryResponse.ok) {
           const summaryData = (await parseResponseBody(summaryResponse)) as {
             summary?: string;
@@ -139,9 +135,7 @@ export const exportToObsidian = async (
           client.baseUrl,
           `/file-meta/${fileMetaId}/keywords`
         );
-        const keywordsResponse = await fetch(keywordsUrl, {
-          headers: client.getAuthHeaders(),
-        });
+        const keywordsResponse = await client.request(keywordsUrl);
         if (keywordsResponse.ok) {
           const keywordsData = (await parseResponseBody(keywordsResponse)) as {
             keywords?: string[];
@@ -155,9 +149,7 @@ export const exportToObsidian = async (
           client.baseUrl,
           `/file-meta/${fileMetaId}/long-summary`
         );
-        const aiSummaryResponse = await fetch(aiSummaryUrl, {
-          headers: client.getAuthHeaders(),
-        });
+        const aiSummaryResponse = await client.request(aiSummaryUrl);
         if (aiSummaryResponse.ok) {
           const aiSummaryData = (await parseResponseBody(
             aiSummaryResponse
@@ -170,9 +162,7 @@ export const exportToObsidian = async (
         client.baseUrl,
         `/file-meta/${fileMetaId}/segment-summary`
       );
-      const segmentsResponse = await fetch(segmentsUrl, {
-        headers: client.getAuthHeaders(),
-      });
+      const segmentsResponse = await client.request(segmentsUrl);
       if (segmentsResponse.ok) {
         const segmentsData = (await parseResponseBody(segmentsResponse)) as {
           segments?: Array<{
@@ -261,7 +251,7 @@ export const batchExportFolder = async (
       limit,
       page: 1,
     });
-    const response = await fetch(url, { headers: client.getAuthHeaders() });
+    const response = await client.request(url);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch boards: ${response.statusText}`);
@@ -292,9 +282,7 @@ export const batchExportFolder = async (
     for (const board of boards) {
       try {
         const boardUrl = buildUrl(client.baseUrl, `/boards/${board.id}`);
-        const boardResponse = await fetch(boardUrl, {
-          headers: client.getAuthHeaders(),
-        });
+        const boardResponse = await client.request(boardUrl);
 
         if (!boardResponse.ok) {
           logger.error(
@@ -325,9 +313,7 @@ export const batchExportFolder = async (
             `/file-meta/${fileMetaId}/script`,
             { includeContent: "true" }
           );
-          const scriptResponse = await fetch(scriptUrl, {
-            headers: client.getAuthHeaders(),
-          });
+          const scriptResponse = await client.request(scriptUrl);
 
           if (scriptResponse.ok) {
             const scriptData = (await parseResponseBody(scriptResponse)) as

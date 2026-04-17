@@ -457,9 +457,7 @@ export const createYoutubeHighlightClip = async (
 
     if (!fileMetaId && args.boardId) {
       const boardUrl = buildUrl(client.baseUrl, `/boards/${args.boardId}`);
-      const boardResponse = await fetch(boardUrl, {
-        headers: client.getAuthHeaders(),
-      });
+      const boardResponse = await client.request(boardUrl);
       if (!boardResponse.ok) {
         throw new Error(`Failed to fetch board: ${boardResponse.statusText}`);
       }
@@ -485,9 +483,7 @@ export const createYoutubeHighlightClip = async (
         client.baseUrl,
         `/file-meta/${fileMetaId}/keywords`
       );
-      const keywordsResponse = await fetch(keywordsUrl, {
-        headers: client.getAuthHeaders(),
-      });
+      const keywordsResponse = await client.request(keywordsUrl);
       if (keywordsResponse.ok) {
         const keywordsData = (await parseResponseBody(keywordsResponse)) as {
           keywords?: string[];
@@ -505,9 +501,7 @@ export const createYoutubeHighlightClip = async (
       limit: 60,
       page: 0,
     });
-    const scriptResponse = await fetch(scriptUrl, {
-      headers: client.getAuthHeaders(),
-    });
+    const scriptResponse = await client.request(scriptUrl);
     if (!scriptResponse.ok) {
       throw new Error(`Failed to fetch script: ${scriptResponse.statusText}`);
     }
@@ -527,9 +521,7 @@ export const createYoutubeHighlightClip = async (
         limit: 60,
         page,
       });
-      const pageResponse = await fetch(pageUrl, {
-        headers: client.getAuthHeaders(),
-      });
+      const pageResponse = await client.request(pageUrl);
       if (!pageResponse.ok) {
         throw new Error(`Failed to fetch script page ${page}: ${pageResponse.statusText}`);
       }
@@ -680,9 +672,7 @@ export const createYoutubeFullSubtitledVideo = async (
 
     if (!fileMetaId && args.boardId) {
       const boardUrl = buildUrl(client.baseUrl, `/boards/${args.boardId}`);
-      const boardResponse = await fetch(boardUrl, {
-        headers: client.getAuthHeaders(),
-      });
+      const boardResponse = await client.request(boardUrl);
       if (!boardResponse.ok) {
         throw new Error(`Failed to fetch board: ${boardResponse.statusText}`);
       }
@@ -704,9 +694,7 @@ export const createYoutubeFullSubtitledVideo = async (
       limit: 60,
       page: 0,
     });
-    const scriptResponse = await fetch(scriptUrl, {
-      headers: client.getAuthHeaders(),
-    });
+    const scriptResponse = await client.request(scriptUrl);
     if (!scriptResponse.ok) {
       throw new Error(`Failed to fetch script: ${scriptResponse.statusText}`);
     }
@@ -726,9 +714,7 @@ export const createYoutubeFullSubtitledVideo = async (
         limit: 60,
         page,
       });
-      const pageResponse = await fetch(pageUrl, {
-        headers: client.getAuthHeaders(),
-      });
+      const pageResponse = await client.request(pageUrl);
       if (!pageResponse.ok) {
         throw new Error(`Failed to fetch script page ${page}: ${pageResponse.statusText}`);
       }

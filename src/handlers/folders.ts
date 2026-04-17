@@ -11,9 +11,8 @@ export const getFolders = async (
   }
 
   const qs = params.toString();
-  const url = `${client.baseUrl}/folders${qs ? `?${qs}` : ""}`;
 
-  const response = await fetch(url, { headers: client.getAuthHeaders() });
+  const response = await client.request(`/folders${qs ? `?${qs}` : ""}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch folders: ${response.statusText}`);
   }

@@ -64,10 +64,7 @@ export const listBoards = async (
   if (args.keyword) params.append("keyword", args.keyword);
   if (args.checkedFilter) params.append("checkedFilter", args.checkedFilter);
 
-  const response = await fetch(
-    `${client.baseUrl}/v2/boards?${params.toString()}`,
-    { headers: client.getAuthHeaders() }
-  );
+  const response = await client.request(`/v2/boards?${params.toString()}`);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch boards: ${response.statusText}`);
@@ -87,11 +84,11 @@ export const getBoardInfo = async (
   const path = args.sharedBoardId
     ? `/shared-board/${args.sharedBoardId}`
     : `/boards/${args.boardId}`;
-  const headers = args.sharedBoardId
+  const init = args.sharedBoardId
     ? { headers: { "daglo-platform": "web" } }
-    : { headers: client.getAuthHeaders() };
+    : {};
 
-  const response = await fetch(`${client.baseUrl}${path}`, headers);
+  const response = await client.request(path, init);
   if (!response.ok) {
     throw new Error(`Failed to fetch board info: ${response.statusText}`);
   }
@@ -127,9 +124,8 @@ export const getBoardDetail = async (
     const scriptQuery = new URLSearchParams();
     scriptQuery.append("limit", scriptLimit.toString());
     scriptQuery.append("page", scriptPage.toString());
-    const scriptResponse = await fetch(
-      `${client.baseUrl}/file-meta/${args.fileMetaId}/script?${scriptQuery.toString()}`,
-      { headers: client.getAuthHeaders() }
+    const scriptResponse = await client.request(
+      `/file-meta/${args.fileMetaId}/script?${scriptQuery.toString()}`
     );
 
     if (scriptResponse.ok) {
@@ -152,10 +148,7 @@ export const getBoardDetail = async (
     }
   }
 
-  const response = await fetch(
-    `${client.baseUrl}/boards/${args.boardId}`,
-    { headers: client.getAuthHeaders() }
-  );
+  const response = await client.request(`/boards/${args.boardId}`);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch board detail: ${response.statusText}`);
@@ -189,9 +182,8 @@ export const getBoardDetail = async (
   if (shouldIncludeSummary) {
     let summaryData: unknown = null;
     if (args.fileMetaId) {
-      const summaryResponse = await fetch(
-        `${client.baseUrl}/file-meta/${args.fileMetaId}/summary`,
-        { headers: client.getAuthHeaders() }
+      const summaryResponse = await client.request(
+        `/file-meta/${args.fileMetaId}/summary`
       );
       if (summaryResponse.ok) {
         summaryData = await parseResponseBody(summaryResponse);
@@ -204,9 +196,8 @@ export const getBoardDetail = async (
   if (shouldIncludeKeywords) {
     let keywordsData: unknown = null;
     if (args.fileMetaId) {
-      const keywordResponse = await fetch(
-        `${client.baseUrl}/file-meta/${args.fileMetaId}/keyword`,
-        { headers: client.getAuthHeaders() }
+      const keywordResponse = await client.request(
+        `/file-meta/${args.fileMetaId}/keyword`
       );
       if (keywordResponse.ok) {
         keywordsData = await parseResponseBody(keywordResponse);
@@ -219,9 +210,8 @@ export const getBoardDetail = async (
   if (shouldIncludeAiSummary) {
     let aiSummaryData: unknown = null;
     if (args.fileMetaId) {
-      const longSummaryResponse = await fetch(
-        `${client.baseUrl}/file-meta/${args.fileMetaId}/long-summary`,
-        { headers: client.getAuthHeaders() }
+      const longSummaryResponse = await client.request(
+        `/file-meta/${args.fileMetaId}/long-summary`
       );
       if (longSummaryResponse.ok) {
         aiSummaryData = await parseResponseBody(longSummaryResponse);
@@ -234,9 +224,8 @@ export const getBoardDetail = async (
   if (shouldIncludeSegments) {
     let segmentData: unknown = null;
     if (args.fileMetaId) {
-      const segmentResponse = await fetch(
-        `${client.baseUrl}/file-meta/${args.fileMetaId}/segment-summary`,
-        { headers: client.getAuthHeaders() }
+      const segmentResponse = await client.request(
+        `/file-meta/${args.fileMetaId}/segment-summary`
       );
       if (segmentResponse.ok) {
         segmentData = await parseResponseBody(segmentResponse);
@@ -317,7 +306,7 @@ export const getBoardScript = async (
     page,
   });
 
-  const response = await fetch(url, { headers: client.getAuthHeaders() });
+  const response = await client.request(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch script: ${response.statusText}`);
   }
@@ -343,9 +332,8 @@ export const updateBoardName = async (
 ): Promise<unknown> => {
   const requestBody = { name: args.name };
 
-  const response = await fetch(`${client.baseUrl}/boards/${args.boardId}`, {
+  const response = await client.request(`/boards/${args.boardId}`, {
     method: "PATCH",
-    headers: client.getAuthHeaders(),
     body: JSON.stringify(requestBody),
   });
 
@@ -366,10 +354,7 @@ export const getLatestBoardContent = async (
   params.append("limit", limit.toString());
   params.append("sort", "createTime.desc");
 
-  const listResponse = await fetch(
-    `${client.baseUrl}/v2/boards?${params.toString()}`,
-    { headers: client.getAuthHeaders() }
-  );
+  const listResponse = await client.request(`/v2/boards?${params.toString()}`);
 
   if (!listResponse.ok) {
     throw new Error(`Failed to fetch boards: ${listResponse.statusText}`);
@@ -401,9 +386,8 @@ export const getLatestBoardContent = async (
 
   const latestBoardFileMetaId = latestBoard.fileMetaId as string | undefined;
   if (latestBoardFileMetaId) {
-    const scriptResponse = await fetch(
-      `${client.baseUrl}/file-meta/${latestBoardFileMetaId}/script?${detailParams.toString()}`,
-      { headers: client.getAuthHeaders() }
+    const scriptResponse = await client.request(
+      `/file-meta/${latestBoardFileMetaId}/script?${detailParams.toString()}`
     );
 
     if (scriptResponse.ok) {
@@ -428,15 +412,13 @@ export const getLatestBoardContent = async (
       throw new Error("Latest board is missing id.");
     }
 
-    let detailResponse = await fetch(
-      `${client.baseUrl}/v2/boards/${latestBoardId}?${detailParams.toString()}`,
-      { headers: client.getAuthHeaders() }
+    let detailResponse = await client.request(
+      `/v2/boards/${latestBoardId}?${detailParams.toString()}`
     );
 
     if (!detailResponse.ok) {
-      detailResponse = await fetch(
-        `${client.baseUrl}/boards/${latestBoardId}?${detailParams.toString()}`,
-        { headers: client.getAuthHeaders() }
+      detailResponse = await client.request(
+        `/boards/${latestBoardId}?${detailParams.toString()}`
       );
     }
 
@@ -480,10 +462,7 @@ export const exportBoardContent = async (
     params.append("limit", limit.toString());
     params.append("sort", "createTime.desc");
 
-    const listResponse = await fetch(
-      `${client.baseUrl}/v2/boards?${params.toString()}`,
-      { headers: client.getAuthHeaders() }
-    );
+    const listResponse = await client.request(`/v2/boards?${params.toString()}`);
 
     if (!listResponse.ok) {
       throw new Error(`Failed to fetch boards: ${listResponse.statusText}`);
@@ -513,9 +492,8 @@ export const exportBoardContent = async (
   let contentSource = "board";
 
   if (targetFileMetaId) {
-    const scriptResponse = await fetch(
-      `${client.baseUrl}/file-meta/${targetFileMetaId}/script?${detailParams.toString()}`,
-      { headers: client.getAuthHeaders() }
+    const scriptResponse = await client.request(
+      `/file-meta/${targetFileMetaId}/script?${detailParams.toString()}`
     );
 
     if (scriptResponse.ok) {
@@ -540,15 +518,13 @@ export const exportBoardContent = async (
       throw new Error("Board detail fetch requires boardId.");
     }
 
-    let detailResponse = await fetch(
-      `${client.baseUrl}/v2/boards/${targetBoardId}?${detailParams.toString()}`,
-      { headers: client.getAuthHeaders() }
+    let detailResponse = await client.request(
+      `/v2/boards/${targetBoardId}?${detailParams.toString()}`
     );
 
     if (!detailResponse.ok) {
-      detailResponse = await fetch(
-        `${client.baseUrl}/boards/${targetBoardId}?${detailParams.toString()}`,
-        { headers: client.getAuthHeaders() }
+      detailResponse = await client.request(
+        `/boards/${targetBoardId}?${detailParams.toString()}`
       );
     }
 
